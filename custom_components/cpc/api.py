@@ -104,6 +104,50 @@ class CPCApi:
         self.org_code = data.get("orgCode")
         return data
 
+    async def get_daily_view(self) -> List[Dict[str, Any]]:
+        """Tiêu thụ theo TỪNG NGÀY - API CHÍNH THỨC của EVN đã tính sẵn
+        (sl-tieu-thu-view), không cần tự tính chênh lệch chỉ số nữa.
+
+        Mỗi phần tử: ngay (ISO date), sanLuongNgay (kWh tiêu thụ ngày đó,
+        đã tính sẵn), sanLuongTrungBinh (trung bình cộng dồn từ đầu kỳ),
+        chiSoCongTo (chi tiết chỉ số đầu/cuối ngày), message (ghi chú của
+        EVN - ví dụ ngày thiếu dữ liệu chỉ số sẽ dồn sang ngày sau).
+        """
+        if not self.org_code:
+            await self.get_customer_info()
+        data = await self._get(
+            "/api/remote/meter/rf/sl-tieu-thu-view",
+            params={"customerCode": self.customer_code, "orgCode": self.org_code},
+        )
+        return data if isinstance(data, list) else []
+
+    async def get_consumption_summary(self) -> Optional[Dict[str, Any]]:
+        """Tóm tắt tiêu thụ hôm nay/hôm qua/tháng này/tháng trước + ngưỡng
+        cảnh báo, đã được EVN tính sẵn (power-consumption-alerts).
+
+        Trả về dict với electricConsumption = {electricConsumptionToday,
+        electricConsumptionYesterday, electricConsumptionThisMonth,
+        electricConsumptionLastMonth, electricConsumptionThresholdDay,
+        electricConsumptionThresholdMonth, ...}. Có thể là None nếu
+        khách hàng chưa từng bật tính năng cảnh báo tiêu thụ trên app EVN.
+        """
+        try:
+            data = await self._get(
+                f"/api/cskh/power-consumption-alerts/by-customer-code/{self.customer_code}"
+            )
+        except CPCApiError:
+            return None
+        return data if isinstance(data, dict) else None
+
+    async def get_meter_change_history(self) -> List[Dict[str, Any]]:
+        """Lịch sử treo tháo / thay công tơ (biendongtreothao)."""
+        data = await self._get(
+            "/api/remote/biendongtreothao",
+            params={"customerCode": self.customer_code, "appType": "Web", "isLoad": 0},
+        )
+        result = data.get("result") or []
+        return result
+
     async def get_index_log(self) -> List[Dict[str, Any]]:
         """Log chỉ số công tơ đọc mỗi ~6 tiếng/lần (spider/thongTinChiSo).
 
@@ -145,8 +189,14 @@ class CPCApi:
         customer_info = await self.get_customer_info()
         index_log = await self.get_index_log()
         bill_history = await self.get_bill_history()
+        daily_view = await self.get_daily_view()
+        consumption_summary = await self.get_consumption_summary()
+        meter_changes = await self.get_meter_change_history()
         return {
             "customer_info": customer_info,
             "index_log": index_log,
             "bill_history": bill_history,
+            "daily_view": daily_view,
+            "consumption_summary": consumption_summary,
+            "meter_changes": meter_changes,
         }

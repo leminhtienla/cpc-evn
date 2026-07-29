@@ -1,7 +1,6 @@
 """Sensors cho CPC."""
 
 import logging
-from datetime import datetime
 from typing import Optional
 
 from homeassistant.components.sensor import SensorEntity
@@ -20,48 +19,6 @@ def _latest_index(index_log: list) -> Optional[dict]:
     if not index_log:
         return None
     return sorted(index_log, key=lambda r: r.get("NGAYGIO") or "")[-1]
-
-
-def _daily_breakdown(index_log: list) -> list:
-    """Tính tiêu thụ theo TỪNG NGÀY từ log chỉ số đọc mỗi ~6 tiếng.
-
-    Cách tính: nhóm các lần đọc theo ngày (lấy phần ngày của NGAYGIO),
-    với mỗi ngày chỉ giữ lại bản ghi có giờ muộn nhất (chỉ số cuối ngày).
-    Tiêu thụ trong ngày = chỉ số cuối ngày N - chỉ số cuối ngày N-1.
-    Ngày đầu tiên trong log không tính được tiêu thụ (không có ngày liền
-    trước để trừ) nên bị bỏ qua.
-    """
-    if not index_log:
-        return []
-
-    by_date = {}
-    for r in index_log:
-        ngaygio = r.get("NGAYGIO")
-        cs_moi = r.get("CS_MOI")
-        if not ngaygio or cs_moi is None:
-            continue
-        date_part = ngaygio[:10]  # "2026-07-29T13:09:44.38" -> "2026-07-29"
-        existing = by_date.get(date_part)
-        if existing is None or ngaygio > existing["NGAYGIO"]:
-            by_date[date_part] = {"NGAYGIO": ngaygio, "CS_MOI": cs_moi}
-
-    sorted_dates = sorted(by_date.keys())
-    result = []
-    prev_cs = None
-    for date_str in sorted_dates:
-        cs = by_date[date_str]["CS_MOI"]
-        if prev_cs is not None:
-            result.append(
-                {
-                    "Ngày": datetime.strptime(date_str, "%Y-%m-%d").strftime("%d-%m-%Y"),
-                    "Chỉ số cuối ngày": cs,
-                    "Tiêu thụ (kWh)": round(cs - prev_cs, 3),
-                }
-            )
-        prev_cs = cs
-    # Mới nhất lên đầu
-    result.reverse()
-    return result
 
 
 def _latest_bill(bill_history: list) -> Optional[dict]:
@@ -86,11 +43,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     entities = [
         CPCRealtimeSensor(coordinator, customer_code),
         CPCDailyBreakdownSensor(coordinator, customer_code),
+        CPCTodayYesterdaySensor(coordinator, customer_code),
         CPCMonthlyConsumptionSensor(coordinator, customer_code),
         CPCMonthlyCostSensor(coordinator, customer_code),
         CPCLastYearConsumptionSensor(coordinator, customer_code),
         CPCLastYearCostSensor(coordinator, customer_code),
         CPCBillHistorySensor(coordinator, customer_code),
+        CPCMeterChangeHistorySensor(coordinator, customer_code),
     ]
     async_add_entities(entities)
 
@@ -145,7 +104,7 @@ class CPCRealtimeSensor(CPCBaseSensor):
 
 
 class CPCDailyBreakdownSensor(CPCBaseSensor):
-    """Tiêu thụ theo TỪNG NGÀY - tự tính từ log chỉ số đọc mỗi ~6 tiếng."""
+    """Tiêu thụ theo TỪNG NGÀY - từ API chính thức sl-tieu-thu-view của EVN."""
 
     _sensor_key = "tieu_thu_theo_ngay"
     _attr_name = "Tiêu thụ theo ngày"
@@ -154,21 +113,68 @@ class CPCDailyBreakdownSensor(CPCBaseSensor):
 
     @property
     def native_value(self):
-        index_log = (self.coordinator.data or {}).get("index_log", [])
-        breakdown = _daily_breakdown(index_log)
-        # State = tiêu thụ của ngày gần nhất tính được (không phải hôm nay
-        # nếu hôm nay chưa có đủ 2 lần đọc để trừ)
-        return breakdown[0]["Tiêu thụ (kWh)"] if breakdown else None
+        daily_view = (self.coordinator.data or {}).get("daily_view", [])
+        if not daily_view:
+            return None
+        latest = sorted(daily_view, key=lambda r: r.get("ngay") or "")[-1]
+        return latest.get("sanLuongNgay")
 
     @property
     def extra_state_attributes(self) -> dict:
-        index_log = (self.coordinator.data or {}).get("index_log", [])
-        breakdown = _daily_breakdown(index_log)
+        daily_view = (self.coordinator.data or {}).get("daily_view", [])
+        if not daily_view:
+            return {}
+        sorted_rows = sorted(daily_view, key=lambda r: r.get("ngay") or "", reverse=True)
+        latest = sorted_rows[0]
         return {
-            "Ngày gần nhất tính được": breakdown[0]["Ngày"] if breakdown else None,
-            "Chi tiết": breakdown,
-            "Nguồn": "cskh.cpc.vn (spider/thongTinChiSo) - tự tính chênh lệch chỉ số giữa các ngày",
-            "Lưu ý": "Không có tiền điện theo ngày - EVN chỉ tính tiền điện theo bậc thang lũy tiến hàng THÁNG, không có khái niệm tiền điện của riêng 1 ngày.",
+            "Ngày gần nhất": latest.get("ngay", "")[:10],
+            "Chi tiết": [
+                {
+                    "Ngày": r.get("ngay", "")[:10],
+                    "Tiêu thụ (kWh)": r.get("sanLuongNgay"),
+                    "Trung bình cộng dồn từ đầu kỳ (kWh)": r.get("sanLuongTrungBinh"),
+                }
+                for r in sorted_rows
+            ],
+            "Nguồn": "cskh.cpc.vn (meter/rf/sl-tieu-thu-view) - API chính thức của EVN, không phải tự tính",
+            "Ghi chú của EVN": latest.get("message"),
+        }
+
+
+class CPCTodayYesterdaySensor(CPCBaseSensor):
+    """Tiêu thụ hôm nay/hôm qua + ngưỡng cảnh báo - từ power-consumption-alerts."""
+
+    _sensor_key = "tieu_thu_hom_nay"
+    _attr_name = "Tiêu thụ hôm nay"
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_icon = "mdi:flash"
+
+    @property
+    def _ec(self) -> dict:
+        summary = (self.coordinator.data or {}).get("consumption_summary")
+        if not summary:
+            return {}
+        return summary.get("electricConsumption") or {}
+
+    @property
+    def native_value(self):
+        return self._ec.get("electricConsumptionToday")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        ec = self._ec
+        if not ec:
+            return {}
+        return {
+            "Tiêu thụ hôm qua (kWh)": ec.get("electricConsumptionYesterday"),
+            "Tiêu thụ tháng này (kWh)": ec.get("electricConsumptionThisMonth"),
+            "Tiêu thụ tháng trước (kWh)": ec.get("electricConsumptionLastMonth"),
+            "Ngưỡng cảnh báo theo ngày (kWh)": ec.get("electricConsumptionThresholdDay"),
+            "Ngưỡng cảnh báo theo tháng (kWh)": ec.get("electricConsumptionThresholdMonth"),
+            "Vượt ngưỡng ngày (kWh)": ec.get("electricConsumptionExceededThresholdDay"),
+            "Vượt ngưỡng tháng (kWh)": ec.get("electricConsumptionExceededThresholdMonth"),
+            "Cảnh báo đang bật": (self.coordinator.data or {}).get("consumption_summary", {}).get("isActive"),
+            "Nguồn": "cskh.cpc.vn (power-consumption-alerts)",
         }
 
 
@@ -279,5 +285,33 @@ class CPCBillHistorySensor(CPCBaseSensor):
                     "Chỉ số cuối kỳ": r.get("CHISO_MOI"),
                 }
                 for r in sorted(bills, key=lambda r: (r.get("NAM", 0), r.get("THANG", 0)), reverse=True)
+            ]
+        }
+
+
+class CPCMeterChangeHistorySensor(CPCBaseSensor):
+    """Lịch sử treo tháo / thay công tơ (biendongtreothao)."""
+
+    _sensor_key = "lich_su_treo_thao_cong_to"
+    _attr_name = "Lịch sử treo tháo công tơ"
+    _attr_icon = "mdi:electric-switch"
+
+    @property
+    def native_value(self):
+        changes = (self.coordinator.data or {}).get("meter_changes", [])
+        return len(changes)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        changes = (self.coordinator.data or {}).get("meter_changes", [])
+        return {
+            "Chi tiết": [
+                {
+                    "Ngày": r.get("NGAY_BDONG", "")[:10],
+                    "Số công tơ": r.get("SO_CTO"),
+                    "Loại biến động": "Lắp mới" if r.get("MA_BDONG") == "B" else "Tháo" if r.get("MA_BDONG") == "E" else r.get("MA_BDONG"),
+                    "Lý do": r.get("TEN_LDO"),
+                }
+                for r in sorted(changes, key=lambda r: r.get("NGAY_BDONG") or "", reverse=True)
             ]
         }

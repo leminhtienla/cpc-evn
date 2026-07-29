@@ -13,30 +13,38 @@ Tất cả endpoint dưới đây được xác nhận bằng cách bắt reques
 |---|---|
 | `POST /api/cskh/user/login` | Đăng nhập, lấy Bearer token |
 | `GET /api/remote/customers/{code}/info` | Thông tin khách hàng, mã công tơ, orgCode |
-| `GET /api/remote/spider/thongTinChiSo?customerCode=...&orgCode=...` | Log chỉ số đọc mỗi ~6 tiếng/lần trong kỳ hiện tại — dùng để tính chỉ số realtime VÀ tiêu thụ theo từng ngày (tự tính chênh lệch) |
+| `GET /api/remote/spider/thongTinChiSo?customerCode=...&orgCode=...` | Log chỉ số đọc mỗi ~6 tiếng/lần trong kỳ hiện tại — dùng cho chỉ số thời gian thực |
+| `GET /api/remote/meter/rf/sl-tieu-thu-view?customerCode=...&orgCode=...` | **Tiêu thụ theo TỪNG NGÀY - API CHÍNH THỨC của EVN đã tính sẵn**, không cần tự tính chênh lệch |
+| `GET /api/cskh/power-consumption-alerts/by-customer-code/{code}` | Tóm tắt hôm nay/hôm qua/tháng này/tháng trước + ngưỡng cảnh báo, EVN tính sẵn |
 | `GET /api/remote/thongTinHoaDonSpider?customerCode=...&maDonViQuanLy=...` | Lịch sử hóa đơn đầy đủ theo tháng (kWh + tiền + chỉ số đầu/cuối kỳ), phủ nhiều năm |
+| `GET /api/remote/biendongtreothao?customerCode=...` | Lịch sử treo tháo / thay công tơ |
 
 ## Đã xác nhận hoạt động (test với dữ liệu thật)
 
-Tiêu thụ theo ngày tính từ `spider/thongTinChiSo` đã test khớp đúng cho
-các ngày mà API tra cứu chính thức (`chisongay`) không có dữ liệu (ví dụ
-27, 28, 29/7 khi test) — xem cách tính trong `sensor.py` hàm
-`_daily_breakdown()`.
+- Tiêu thụ theo ngày từ `sl-tieu-thu-view` (API chính thức) đã test khớp
+  1:1 với `power-consumption-alerts` cho cùng ngày (29/7: cả 2 đều ra
+  3.37 kWh) — xác nhận độ tin cậy cao, không cần tự tính chênh lệch chỉ
+  số như cách cũ nữa.
 
 ## Giới hạn đã biết
 
 - **Không có tiền điện theo từng ngày** — EVN chỉ tính tiền theo bậc
   thang lũy tiến hàng THÁNG, không có khái niệm "tiền điện của 1 ngày".
   Sensor theo ngày chỉ có kWh.
+- `power-consumption-alerts` có thể trả về rỗng nếu tài khoản chưa từng
+  bật tính năng "Cảnh báo tiêu thụ điện" trên app/web EVN — khi đó sensor
+  "Tiêu thụ hôm nay" sẽ là `None`, không phải lỗi.
 - Tài khoản có bật captcha khi đăng nhập sẽ **không đăng nhập tự động
   được** qua integration này (EVN yêu cầu giải captcha thủ công).
 
 ## Sensors
 
 - `Chỉ số thời gian thực` (kWh) — chỉ số công tơ mới nhất
-- `Tiêu thụ theo ngày` (kWh) — tự tính chênh lệch chỉ số giữa các ngày, attribute `Chi tiết` chứa toàn bộ bảng ngày tính được
+- `Tiêu thụ theo ngày` (kWh) — API chính thức EVN, attribute `Chi tiết` chứa toàn bộ bảng ngày
+- `Tiêu thụ hôm nay` (kWh) — kèm attribute hôm qua, tháng này, tháng trước, ngưỡng cảnh báo
 - `Tiêu thụ tháng này` (kWh)
 - `Tiền điện tháng này` (VNĐ)
 - `Tiêu thụ cùng kỳ năm trước` (kWh)
 - `Tiền điện cùng kỳ năm trước` (VNĐ)
 - `Lịch sử hóa đơn theo tháng` — attribute chứa toàn bộ lịch sử (có thể nhiều năm)
+- `Lịch sử treo tháo công tơ` — attribute chứa lịch sử thay/lắp công tơ
