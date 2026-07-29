@@ -1,0 +1,12 @@
+{
+    "domain": "cpc",
+    "name": "CPC - Điện lực Miền Trung",
+    "codeowners": ["@leminhtienla"],
+    "config_flow": true,
+    "dependencies": [],
+    "documentation": "https://github.com/leminhtienla/cpc-evn/",
+    "iot_class": "cloud_polling",
+    "issue_tracker": "https://github.com/leminhtienla/cpc-evn/issues",
+    "requirements": [],
+    "version": "1.1.0"
+}

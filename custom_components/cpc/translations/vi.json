@@ -1,0 +1,23 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Đăng nhập CPC (Điện lực Miền Trung)",
+        "description": "Đăng nhập bằng tài khoản cổng cskh.cpc.vn",
+        "data": {
+          "username": "Tên đăng nhập",
+          "password": "Mật khẩu",
+          "customer_code": "Mã khách hàng (bắt đầu bằng P, tối thiểu 11 ký tự)"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Mã khách hàng này đã được cấu hình rồi"
+    },
+    "error": {
+      "invalid_format": "Mã khách hàng không hợp lệ (phải bắt đầu bằng P, tối thiểu 11 ký tự)",
+      "invalid_auth": "Sai tên đăng nhập hoặc mật khẩu, hoặc tài khoản yêu cầu captcha",
+      "cannot_connect": "Không kết nối được tới cskh.cpc.vn, thử lại sau"
+    }
+  }
+}

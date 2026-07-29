@@ -1,0 +1,23 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Log in to CPC (Central Vietnam Power)",
+        "description": "Log in with your cskh.cpc.vn account",
+        "data": {
+          "username": "Username",
+          "password": "Password",
+          "customer_code": "Customer code (starts with P, at least 11 characters)"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This customer code is already configured"
+    },
+    "error": {
+      "invalid_format": "Invalid customer code (must start with P, at least 11 characters)",
+      "invalid_auth": "Wrong username/password, or the account requires captcha",
+      "cannot_connect": "Could not connect to cskh.cpc.vn, try again later"
+    }
+  }
+}
