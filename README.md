@@ -40,18 +40,21 @@ Tất cả endpoint dưới đây được xác nhận bằng cách bắt reques
 ## Sensors
 
 - `Chỉ số thời gian thực` (kWh) — chỉ số công tơ mới nhất
-- `Giờ server EVN` — giờ hiện tại theo server (từ header HTTP `Date`), dùng đối chiếu khi nghi ngờ lệch múi giờ/lệch ngày
 - `Tổng tiêu thụ dồn kỳ này (theo ngày)` (kWh) — tổng cộng dồn từ đầu kỳ hóa đơn hiện tại tới nay, attribute `Chi tiết` chứa bảng đầy đủ từng ngày
 - `Tiêu thụ hôm nay` (kWh) — kèm attribute hôm qua, tháng này, tháng trước, ngưỡng cảnh báo
-- `Tiêu thụ tháng X/Y (đang chạy)` (kWh) — tên tự nhúng tháng/năm hiện tại (theo giờ server), chưa chốt kỳ nên **chưa có tiền điện**
-- `Tiêu thụ/Tiền điện kỳ hóa đơn tháng X/Y` — tên tự nhúng đúng tháng/năm của kỳ **ĐÃ CHỐT** gần nhất
-- `Tiêu thụ/Tiền điện cùng kỳ tháng X/Y` — tên tự nhúng đúng tháng/năm cùng kỳ năm trước (so với kỳ đã chốt ở trên)
+- `Kỳ hóa đơn gần nhất` *(entity riêng)* — state dạng "Tháng 6/2026", cho biết `Tiêu thụ/Tiền điện kỳ hóa đơn gần nhất` đang là của tháng nào
+- `Tiêu thụ kỳ hóa đơn gần nhất` (kWh)
+- `Tiền điện kỳ hóa đơn gần nhất` (VNĐ)
+- `Tháng hiện tại (đang chạy)` *(entity riêng)* — state dạng "Tháng 7/2026", theo giờ server EVN
+- `Tiêu thụ tháng này` (kWh) — tháng dương lịch đang chạy, chưa chốt kỳ nên **chưa có tiền điện**
+- `Tiêu thụ cùng kỳ năm trước` / `Tiền điện cùng kỳ năm trước` — so với cùng THÁNG của kỳ hóa đơn gần nhất (attribute có Tháng/Năm chính xác)
 - `Lịch sử hóa đơn theo tháng` — attribute chứa toàn bộ lịch sử (có thể nhiều năm)
 - `Lịch sử treo tháo công tơ` — attribute chứa lịch sử thay/lắp công tơ
 
-Tên các sensor tháng/kỳ hóa đơn ở trên là **tên động** - tự cập nhật theo
-tháng/năm thực tế mỗi khi coordinator refresh, không cần đoán qua
-attribute nữa.
+Tên các sensor số liệu (tiêu thụ/tiền điện) là **tên tĩnh, cố định** —
+muốn biết đang thuộc tháng nào thì xem 2 entity riêng `Kỳ hóa đơn gần
+nhất` và `Tháng hiện tại (đang chạy)` ở trên, hoặc xem attribute
+"Tháng"/"Năm" của từng sensor.
 
 ### ⚠️ Lưu ý quan trọng: "tháng này" vs "kỳ hóa đơn gần nhất"
 

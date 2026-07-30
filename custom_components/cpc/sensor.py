@@ -4,7 +4,7 @@ import logging
 from email.utils import parsedate_to_datetime
 from typing import Optional
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
@@ -44,10 +44,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     entities = [
         CPCRealtimeSensor(coordinator, customer_code),
-        CPCServerTimeSensor(coordinator, customer_code),
         CPCDailyBreakdownSensor(coordinator, customer_code),
         CPCTodayYesterdaySensor(coordinator, customer_code),
+        CPCCurrentPeriodSensor(coordinator, customer_code),
         CPCCurrentMonthRunningSensor(coordinator, customer_code),
+        CPCLatestBillPeriodSensor(coordinator, customer_code),
         CPCMonthlyConsumptionSensor(coordinator, customer_code),
         CPCMonthlyCostSensor(coordinator, customer_code),
         CPCLastYearConsumptionSensor(coordinator, customer_code),
@@ -109,39 +110,6 @@ class CPCRealtimeSensor(CPCBaseSensor):
             "Thời điểm đọc": latest.get("NGAYGIO"),
             "Số công tơ": latest.get("SO_CTO"),
             "Nguồn": "cskh.cpc.vn (spider/thongTinChiSo)",
-        }
-
-
-class CPCServerTimeSensor(CPCBaseSensor):
-    """Giờ hiện tại theo server EVN (cskh-api.cpc.vn), lấy từ header HTTP
-    "Date" chuẩn của mọi response. Dùng để đối chiếu khi cần kiểm tra
-    "hôm nay/tháng này" có bị lệch múi giờ hoặc lệch ngày so với server
-    tính toán hay không - ví dụ khi HA và server rơi vào 2 ngày khác nhau
-    lúc gần nửa đêm.
-    """
-
-    _sensor_key = "gio_server_evn"
-    _attr_name = "Giờ server EVN"
-    _attr_icon = "mdi:web-clock"
-    _attr_device_class = SensorDeviceClass.TIMESTAMP
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self):
-        header = (self.coordinator.data or {}).get("server_time_header")
-        if not header:
-            return None
-        try:
-            return parsedate_to_datetime(header)
-        except (TypeError, ValueError):
-            return None
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        header = (self.coordinator.data or {}).get("server_time_header")
-        return {
-            "Header gốc": header,
-            "Nguồn": "HTTP response header 'Date' từ cskh-api.cpc.vn",
         }
 
 
@@ -236,20 +204,40 @@ class CPCTodayYesterdaySensor(CPCBaseSensor):
         }
 
 
+class CPCLatestBillPeriodSensor(CPCBaseSensor):
+    """Entity RIÊNG chỉ để biết kỳ hóa đơn ĐÃ CHỐT gần nhất là tháng nào -
+    tách khỏi tên/giá trị của sensor tiêu thụ & tiền điện, để không phải
+    đoán qua attribute.
+    """
+
+    _sensor_key = "ky_hoa_don_gan_nhat"
+    _attr_name = "Kỳ hóa đơn gần nhất"
+    _attr_icon = "mdi:calendar-check"
+
+    @property
+    def native_value(self):
+        bills = (self.coordinator.data or {}).get("bill_history", [])
+        latest = _latest_bill(bills)
+        if not latest:
+            return None
+        return f"Tháng {latest.get('THANG')}/{latest.get('NAM')}"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        bills = (self.coordinator.data or {}).get("bill_history", [])
+        latest = _latest_bill(bills)
+        if not latest:
+            return {}
+        return {"Tháng": latest.get("THANG"), "Năm": latest.get("NAM")}
+
+
 class CPCMonthlyConsumptionSensor(CPCBaseSensor):
     """Sản lượng tiêu thụ tháng/kỳ hóa đơn gần nhất (kWh)."""
 
     _sensor_key = "tieu_thu_ky_hoa_don_gan_nhat"
+    _attr_name = "Tiêu thụ kỳ hóa đơn gần nhất"
     _attr_native_unit_of_measurement = "kWh"
     _attr_icon = "mdi:transmission-tower-export"
-
-    @property
-    def name(self):
-        bills = (self.coordinator.data or {}).get("bill_history", [])
-        latest = _latest_bill(bills)
-        if latest:
-            return f"Tiêu thụ kỳ hóa đơn tháng {latest.get('THANG')}/{latest.get('NAM')}"
-        return "Tiêu thụ kỳ hóa đơn gần nhất"
 
     @property
     def native_value(self):
@@ -278,16 +266,9 @@ class CPCMonthlyCostSensor(CPCBaseSensor):
     """Tiền điện kỳ hóa đơn ĐÃ CHỐT gần nhất (VNĐ)."""
 
     _sensor_key = "tien_dien_ky_hoa_don_gan_nhat"
+    _attr_name = "Tiền điện kỳ hóa đơn gần nhất"
     _attr_native_unit_of_measurement = "VNĐ"
     _attr_icon = "mdi:cash-multiple"
-
-    @property
-    def name(self):
-        bills = (self.coordinator.data or {}).get("bill_history", [])
-        latest = _latest_bill(bills)
-        if latest:
-            return f"Tiền điện kỳ hóa đơn tháng {latest.get('THANG')}/{latest.get('NAM')}"
-        return "Tiền điện kỳ hóa đơn gần nhất"
 
     @property
     def native_value(self):
@@ -309,6 +290,27 @@ class CPCMonthlyCostSensor(CPCBaseSensor):
         }
 
 
+class CPCCurrentPeriodSensor(CPCBaseSensor):
+    """Entity RIÊNG chỉ để biết tháng dương lịch hiện tại (đang chạy, chưa
+    chốt kỳ) là tháng nào, theo giờ server EVN.
+    """
+
+    _sensor_key = "thang_hien_tai"
+    _attr_name = "Tháng hiện tại (đang chạy)"
+    _attr_icon = "mdi:calendar-clock"
+
+    @property
+    def native_value(self):
+        server_header = (self.coordinator.data or {}).get("server_time_header")
+        if not server_header:
+            return None
+        try:
+            dt = parsedate_to_datetime(server_header)
+        except (TypeError, ValueError):
+            return None
+        return f"Tháng {dt.month}/{dt.year}"
+
+
 class CPCCurrentMonthRunningSensor(CPCBaseSensor):
     """Tiêu thụ tháng dương lịch HIỆN TẠI, đang chạy - chưa chốt hóa đơn nên
     chưa có tiền điện (EVN chỉ tính tiền khi chốt kỳ). Nguồn:
@@ -316,6 +318,7 @@ class CPCCurrentMonthRunningSensor(CPCBaseSensor):
     """
 
     _sensor_key = "tieu_thu_thang_nay"
+    _attr_name = "Tiêu thụ tháng này"
     _attr_native_unit_of_measurement = "kWh"
     _attr_icon = "mdi:calendar-clock"
 
@@ -329,13 +332,6 @@ class CPCCurrentMonthRunningSensor(CPCBaseSensor):
             except (TypeError, ValueError):
                 pass
         return None, None
-
-    @property
-    def name(self):
-        thang, nam = self._server_month_year
-        if thang and nam:
-            return f"Tiêu thụ tháng {thang}/{nam} (đang chạy)"
-        return "Tiêu thụ tháng này"
 
     @property
     def _ec(self) -> dict:
@@ -365,6 +361,7 @@ class CPCLastYearConsumptionSensor(CPCBaseSensor):
     """Sản lượng cùng tháng, năm trước (kWh) - so sánh với kỳ hóa đơn đã chốt gần nhất."""
 
     _sensor_key = "tieu_thu_cung_ky_nam_truoc"
+    _attr_name = "Tiêu thụ cùng kỳ năm trước"
     _attr_native_unit_of_measurement = "kWh"
     _attr_icon = "mdi:transmission-tower-export"
 
@@ -374,13 +371,6 @@ class CPCLastYearConsumptionSensor(CPCBaseSensor):
         if not latest:
             return None
         return _same_period_last_year(bills, latest.get("THANG"), latest.get("NAM"))
-
-    @property
-    def name(self):
-        same = self._same()
-        if same:
-            return f"Tiêu thụ cùng kỳ tháng {same.get('THANG')}/{same.get('NAM')}"
-        return "Tiêu thụ cùng kỳ năm trước"
 
     @property
     def native_value(self):
@@ -399,6 +389,7 @@ class CPCLastYearCostSensor(CPCBaseSensor):
     """Tiền điện cùng tháng, năm trước (VNĐ)."""
 
     _sensor_key = "tien_dien_cung_ky_nam_truoc"
+    _attr_name = "Tiền điện cùng kỳ năm trước"
     _attr_native_unit_of_measurement = "VNĐ"
     _attr_icon = "mdi:cash-multiple"
 
@@ -408,13 +399,6 @@ class CPCLastYearCostSensor(CPCBaseSensor):
         if not latest:
             return None
         return _same_period_last_year(bills, latest.get("THANG"), latest.get("NAM"))
-
-    @property
-    def name(self):
-        same = self._same()
-        if same:
-            return f"Tiền điện cùng kỳ tháng {same.get('THANG')}/{same.get('NAM')}"
-        return "Tiền điện cùng kỳ năm trước"
 
     @property
     def native_value(self):
