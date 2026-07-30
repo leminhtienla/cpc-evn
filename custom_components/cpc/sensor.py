@@ -44,6 +44,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         CPCRealtimeSensor(coordinator, customer_code),
         CPCDailyBreakdownSensor(coordinator, customer_code),
         CPCTodayYesterdaySensor(coordinator, customer_code),
+        CPCCurrentMonthRunningSensor(coordinator, customer_code),
         CPCMonthlyConsumptionSensor(coordinator, customer_code),
         CPCMonthlyCostSensor(coordinator, customer_code),
         CPCLastYearConsumptionSensor(coordinator, customer_code),
@@ -186,8 +187,8 @@ class CPCTodayYesterdaySensor(CPCBaseSensor):
 class CPCMonthlyConsumptionSensor(CPCBaseSensor):
     """Sản lượng tiêu thụ tháng/kỳ hóa đơn gần nhất (kWh)."""
 
-    _sensor_key = "tieu_thu_thang_nay"
-    _attr_name = "Tiêu thụ tháng này"
+    _sensor_key = "tieu_thu_ky_hoa_don_gan_nhat"
+    _attr_name = "Tiêu thụ kỳ hóa đơn gần nhất"
     _attr_native_unit_of_measurement = "kWh"
     _attr_icon = "mdi:transmission-tower-export"
 
@@ -210,14 +211,15 @@ class CPCMonthlyConsumptionSensor(CPCBaseSensor):
             "Ngày cuối kỳ": latest.get("NGAY_CKY"),
             "Chỉ số đầu kỳ": latest.get("CHISO_CU"),
             "Chỉ số cuối kỳ": latest.get("CHISO_MOI"),
+            "Lưu ý": "Đây là kỳ hóa đơn ĐÃ CHỐT gần nhất (đã có tiền điện chính thức), không phải tháng dương lịch hiện tại đang chạy. Xem sensor 'Tiêu thụ tháng này' để có số liệu tháng hiện tại (chưa chốt, chưa có tiền điện).",
         }
 
 
 class CPCMonthlyCostSensor(CPCBaseSensor):
-    """Tiền điện tháng/kỳ hóa đơn gần nhất (VNĐ)."""
+    """Tiền điện kỳ hóa đơn ĐÃ CHỐT gần nhất (VNĐ)."""
 
-    _sensor_key = "tien_dien_thang_nay"
-    _attr_name = "Tiền điện tháng này"
+    _sensor_key = "tien_dien_ky_hoa_don_gan_nhat"
+    _attr_name = "Tiền điện kỳ hóa đơn gần nhất"
     _attr_native_unit_of_measurement = "VNĐ"
     _attr_icon = "mdi:cash-multiple"
 
@@ -228,8 +230,40 @@ class CPCMonthlyCostSensor(CPCBaseSensor):
         return latest.get("TONG_TIEN") if latest else None
 
 
+class CPCCurrentMonthRunningSensor(CPCBaseSensor):
+    """Tiêu thụ tháng dương lịch HIỆN TẠI, đang chạy - chưa chốt hóa đơn nên
+    chưa có tiền điện (EVN chỉ tính tiền khi chốt kỳ). Nguồn:
+    power-consumption-alerts.electricConsumptionThisMonth.
+    """
+
+    _sensor_key = "tieu_thu_thang_nay"
+    _attr_name = "Tiêu thụ tháng này"
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_icon = "mdi:calendar-clock"
+
+    @property
+    def _ec(self) -> dict:
+        summary = (self.coordinator.data or {}).get("consumption_summary")
+        if not summary:
+            return {}
+        return summary.get("electricConsumption") or {}
+
+    @property
+    def native_value(self):
+        return self._ec.get("electricConsumptionThisMonth")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        if not self._ec:
+            return {}
+        return {
+            "Nguồn": "cskh.cpc.vn (power-consumption-alerts)",
+            "Lưu ý": "Tháng đang chạy, chưa chốt kỳ nên CHƯA CÓ tiền điện. Xem sensor 'Tiêu thụ kỳ hóa đơn gần nhất' để biết tiền điện của kỳ đã chốt gần nhất.",
+        }
+
+
 class CPCLastYearConsumptionSensor(CPCBaseSensor):
-    """Sản lượng cùng tháng, năm trước (kWh) - để so sánh, tự tính từ bill_history."""
+    """Sản lượng cùng tháng, năm trước (kWh) - so sánh với kỳ hóa đơn đã chốt gần nhất."""
 
     _sensor_key = "tieu_thu_cung_ky_nam_truoc"
     _attr_name = "Tiêu thụ cùng kỳ năm trước"

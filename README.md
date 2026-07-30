@@ -42,9 +42,21 @@ Tất cả endpoint dưới đây được xác nhận bằng cách bắt reques
 - `Chỉ số thời gian thực` (kWh) — chỉ số công tơ mới nhất
 - `Tiêu thụ theo ngày` (kWh) — API chính thức EVN, attribute `Chi tiết` chứa toàn bộ bảng ngày
 - `Tiêu thụ hôm nay` (kWh) — kèm attribute hôm qua, tháng này, tháng trước, ngưỡng cảnh báo
-- `Tiêu thụ tháng này` (kWh)
-- `Tiền điện tháng này` (VNĐ)
-- `Tiêu thụ cùng kỳ năm trước` (kWh)
-- `Tiền điện cùng kỳ năm trước` (VNĐ)
+- `Tiêu thụ tháng này` (kWh) — **tháng dương lịch đang chạy**, chưa chốt kỳ nên **chưa có tiền điện**
+- `Tiêu thụ kỳ hóa đơn gần nhất` (kWh) — kỳ **ĐÃ CHỐT** gần nhất (có thể là tháng trước, tùy ngày chốt sổ), có đủ chỉ số đầu/cuối kỳ
+- `Tiền điện kỳ hóa đơn gần nhất` (VNĐ) — tiền điện chính thức của kỳ đã chốt ở trên
+- `Tiêu thụ cùng kỳ năm trước` / `Tiền điện cùng kỳ năm trước` — so sánh với cùng THÁNG của kỳ hóa đơn gần nhất ở trên (không phải so với "tháng này" đang chạy)
 - `Lịch sử hóa đơn theo tháng` — attribute chứa toàn bộ lịch sử (có thể nhiều năm)
 - `Lịch sử treo tháo công tơ` — attribute chứa lịch sử thay/lắp công tơ
+
+### ⚠️ Lưu ý quan trọng: "tháng này" vs "kỳ hóa đơn gần nhất"
+
+EVN chốt hóa đơn theo **ngày ghi công tơ**, không phải cuối tháng dương
+lịch. Ví dụ hôm nay 30/7 nhưng kỳ hóa đơn tháng 6 mới vừa chốt xong (kết
+thúc 30/6) — tháng 7 vẫn đang chạy, **chưa có hóa đơn, chưa có tiền
+điện**. Vì vậy 2 khái niệm này KHÁC NHAU và không thể gộp làm một:
+
+- **"Tiêu thụ tháng này"**: số kWh tháng dương lịch hiện tại tính tới
+  thời điểm hiện tại (chưa đầy đủ cả tháng, tăng dần mỗi ngày).
+- **"Kỳ hóa đơn gần nhất"**: kỳ ĐÃ CHỐT gần nhất - đầy đủ, có tiền điện
+  chính thức, nhưng có thể là tháng trước chứ không phải tháng hiện tại.
