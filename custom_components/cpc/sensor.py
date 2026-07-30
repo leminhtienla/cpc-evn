@@ -49,6 +49,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         CPCCurrentMonthRunningSensor(coordinator, customer_code),
         CPCBillEstimateSensor(coordinator, customer_code),
         CPCLatestBillPeriodSensor(coordinator, customer_code),
+        CPCLastYearPeriodSensor(coordinator, customer_code),
         CPCMonthlyConsumptionSensor(coordinator, customer_code),
         CPCMonthlyCostSensor(coordinator, customer_code),
         CPCLastYearConsumptionSensor(coordinator, customer_code),
@@ -86,7 +87,7 @@ class CPCBaseSensor(CoordinatorEntity, SensorEntity):
 class CPCRealtimeSensor(CPCBaseSensor):
     """Chỉ số công tơ đọc gần thời gian thực nhất (spider/thongTinChiSo)."""
 
-    _sensor_key = "chi_so_realtime"
+    _sensor_key = "chi_so_thoi_gian_thuc"
     _attr_name = "Chỉ số thời gian thực"
     _attr_native_unit_of_measurement = "kWh"
     _attr_icon = "mdi:gauge"
@@ -121,7 +122,7 @@ class CPCDailyBreakdownSensor(CPCBaseSensor):
     "Chi tiết".
     """
 
-    _sensor_key = "tieu_thu_theo_ngay"
+    _sensor_key = "tong_tieu_thu_don_ky_nay"
     _attr_name = "Tổng tiêu thụ dồn kỳ này (theo ngày)"
     _attr_native_unit_of_measurement = "kWh"
     _attr_icon = "mdi:calendar-today"
@@ -208,7 +209,7 @@ class CPCLatestBillPeriodSensor(CPCBaseSensor):
     đoán qua attribute.
     """
 
-    _sensor_key = "ky_hoa_don_gan_nhat"
+    _sensor_key = "thang_truoc"
     _attr_name = "Tháng trước"
     _attr_icon = "mdi:calendar-check"
 
@@ -229,10 +230,42 @@ class CPCLatestBillPeriodSensor(CPCBaseSensor):
         return {"Tháng": latest.get("THANG"), "Năm": latest.get("NAM")}
 
 
+class CPCLastYearPeriodSensor(CPCBaseSensor):
+    """Entity RIÊNG chỉ để biết 'cùng kỳ năm trước' (dùng để so sánh với
+    'Tháng trước') là tháng/năm nào - cùng tháng với 'Tháng trước' nhưng
+    lùi lại đúng 1 năm.
+    """
+
+    _sensor_key = "thang_truoc_nam_truoc"
+    _attr_name = "Tháng trước năm trước"
+    _attr_icon = "mdi:calendar-refresh"
+
+    def _same(self):
+        bills = (self.coordinator.data or {}).get("bill_history", [])
+        latest = _latest_bill(bills)
+        if not latest:
+            return None
+        return _same_period_last_year(bills, latest.get("THANG"), latest.get("NAM"))
+
+    @property
+    def native_value(self):
+        same = self._same()
+        if not same:
+            return None
+        return f"Tháng {same.get('THANG')}/{same.get('NAM')}"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        same = self._same()
+        if not same:
+            return {}
+        return {"Tháng": same.get("THANG"), "Năm": same.get("NAM")}
+
+
 class CPCMonthlyConsumptionSensor(CPCBaseSensor):
     """Sản lượng tiêu thụ tháng/kỳ hóa đơn gần nhất (kWh)."""
 
-    _sensor_key = "tieu_thu_ky_hoa_don_gan_nhat"
+    _sensor_key = "tieu_thu_thang_truoc"
     _attr_name = "Tiêu thụ tháng trước"
     _attr_native_unit_of_measurement = "kWh"
     _attr_icon = "mdi:transmission-tower-export"
@@ -263,7 +296,7 @@ class CPCMonthlyConsumptionSensor(CPCBaseSensor):
 class CPCMonthlyCostSensor(CPCBaseSensor):
     """Tiền điện kỳ hóa đơn ĐÃ CHỐT gần nhất (VNĐ)."""
 
-    _sensor_key = "tien_dien_ky_hoa_don_gan_nhat"
+    _sensor_key = "tien_dien_thang_truoc"
     _attr_name = "Tiền điện tháng trước"
     _attr_native_unit_of_measurement = "VNĐ"
     _attr_icon = "mdi:cash-multiple"
@@ -315,7 +348,7 @@ class CPCCurrentMonthRunningSensor(CPCBaseSensor):
     power-consumption-alerts.electricConsumptionThisMonth.
     """
 
-    _sensor_key = "tieu_thu_thang_nay"
+    _sensor_key = "tieu_thu_thang_hien_tai"
     _attr_name = "Tiêu thụ tháng hiện tại"
     _attr_native_unit_of_measurement = "kWh"
     _attr_icon = "mdi:calendar-clock"
@@ -365,7 +398,7 @@ class CPCBillEstimateSensor(CPCBaseSensor):
     thay đổi (ví dụ dùng điều hoà nhiều hơn vào cuối tháng nóng hơn).
     """
 
-    _sensor_key = "du_tinh_tien_dien_thang_nay"
+    _sensor_key = "du_tinh_tien_dien_thang_hien_tai"
     _attr_name = "Dự tính tiền điện tháng hiện tại"
     _attr_native_unit_of_measurement = "VNĐ"
     _attr_icon = "mdi:calculator"
@@ -404,8 +437,8 @@ class CPCLastYearConsumptionSensor(CPCBaseSensor):
     thì sensor này là tháng 6/2025 - KHÔNG PHẢI so với tháng hiện tại.
     """
 
-    _sensor_key = "tieu_thu_cung_ky_nam_truoc"
-    _attr_name = "Tiêu thụ cùng kỳ năm trước (so với tháng trước)"
+    _sensor_key = "tieu_thu_thang_truoc_nam_truoc"
+    _attr_name = "Tiêu thụ tháng trước năm trước"
     _attr_native_unit_of_measurement = "kWh"
     _attr_icon = "mdi:transmission-tower-export"
 
@@ -436,8 +469,8 @@ class CPCLastYearConsumptionSensor(CPCBaseSensor):
 class CPCLastYearCostSensor(CPCBaseSensor):
     """Tiền điện cùng THÁNG với 'Tháng trước', nhưng của NĂM TRƯỚC."""
 
-    _sensor_key = "tien_dien_cung_ky_nam_truoc"
-    _attr_name = "Tiền điện cùng kỳ năm trước (so với tháng trước)"
+    _sensor_key = "tien_dien_thang_truoc_nam_truoc"
+    _attr_name = "Tiền điện tháng trước năm trước"
     _attr_native_unit_of_measurement = "VNĐ"
     _attr_icon = "mdi:cash-multiple"
 

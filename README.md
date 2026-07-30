@@ -48,8 +48,8 @@ Tất cả endpoint dưới đây được xác nhận bằng cách bắt reques
 - `Tháng trước` *(entity riêng)* — state dạng "Tháng 6/2026" (thực chất là kỳ hóa đơn **ĐÃ CHỐT** gần nhất - có thể không đúng nghĩa đen "tháng dương lịch trước" nếu ngày chốt sổ lệch)
 - `Tiêu thụ tháng trước` (kWh)
 - `Tiền điện tháng trước` (VNĐ)
-- `Tiêu thụ cùng kỳ năm trước (so với tháng trước)` (kWh) — so với **Tháng trước**, KHÔNG PHẢI Tháng hiện tại
-- `Tiền điện cùng kỳ năm trước (so với tháng trước)` (VNĐ) — tương tự
+- `Tiêu thụ tháng trước năm trước` (kWh) — so với **Tháng trước**, KHÔNG PHẢI Tháng hiện tại
+- `Tiền điện tháng trước năm trước` (VNĐ) — tương tự
 
 ## Đã bỏ
 
