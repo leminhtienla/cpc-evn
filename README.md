@@ -17,7 +17,7 @@ Tất cả endpoint dưới đây được xác nhận bằng cách bắt reques
 | `GET /api/remote/meter/rf/sl-tieu-thu-view?customerCode=...&orgCode=...` | **Tiêu thụ theo TỪNG NGÀY - API CHÍNH THỨC của EVN đã tính sẵn**, không cần tự tính chênh lệch |
 | `GET /api/cskh/power-consumption-alerts/by-customer-code/{code}` | Tóm tắt hôm nay/hôm qua/tháng này/tháng trước + ngưỡng cảnh báo, EVN tính sẵn |
 | `GET /api/remote/thongTinHoaDonSpider?customerCode=...&maDonViQuanLy=...` | Lịch sử hóa đơn đầy đủ theo tháng (kWh + tiền + chỉ số đầu/cuối kỳ), phủ nhiều năm |
-| `GET /api/remote/biendongtreothao?customerCode=...` | Lịch sử treo tháo / thay công tơ |
+| `POST https://calc.evn.com.vn/TinhHoaDon/api/Calculate` | **Công cụ tính hoá đơn CHÍNH THỨC của EVN toàn quốc** (domain khác hẳn, KHÔNG cần đăng nhập) - tính tiền điện theo biểu giá bậc thang từ số kWh cho trước. Đã đối chiếu khớp chính xác tới từng đồng với hoá đơn thật (134 kWh → 305.230 VNĐ). |
 
 ## Đã xác nhận hoạt động (test với dữ liệu thật)
 
@@ -42,19 +42,26 @@ Tất cả endpoint dưới đây được xác nhận bằng cách bắt reques
 - `Chỉ số thời gian thực` (kWh) — chỉ số công tơ mới nhất
 - `Tổng tiêu thụ dồn kỳ này (theo ngày)` (kWh) — tổng cộng dồn từ đầu kỳ hóa đơn hiện tại tới nay, attribute `Chi tiết` chứa bảng đầy đủ từng ngày
 - `Tiêu thụ hôm nay` (kWh) — kèm attribute hôm qua, tháng này, tháng trước, ngưỡng cảnh báo
-- `Kỳ hóa đơn gần nhất` *(entity riêng)* — state dạng "Tháng 6/2026", cho biết `Tiêu thụ/Tiền điện kỳ hóa đơn gần nhất` đang là của tháng nào
-- `Tiêu thụ kỳ hóa đơn gần nhất` (kWh)
-- `Tiền điện kỳ hóa đơn gần nhất` (VNĐ)
-- `Tháng hiện tại (đang chạy)` *(entity riêng)* — state dạng "Tháng 7/2026", theo giờ server EVN
-- `Tiêu thụ tháng này` (kWh) — tháng dương lịch đang chạy, chưa chốt kỳ nên **chưa có tiền điện**
-- `Tiêu thụ cùng kỳ năm trước` / `Tiền điện cùng kỳ năm trước` — so với cùng THÁNG của kỳ hóa đơn gần nhất (attribute có Tháng/Năm chính xác)
-- `Lịch sử hóa đơn theo tháng` — attribute chứa toàn bộ lịch sử (có thể nhiều năm)
-- `Lịch sử treo tháo công tơ` — attribute chứa lịch sử thay/lắp công tơ
+- `Tháng hiện tại` *(entity riêng)* — state dạng "Tháng 7/2026"
+- `Tiêu thụ tháng hiện tại` (kWh) — tháng dương lịch đang chạy, chưa chốt kỳ nên **chưa có tiền điện** chính thức
+- `Dự tính tiền điện tháng hiện tại` (VNĐ) — ngoại suy kWh đã dùng ra hết kỳ, tính theo biểu giá bậc thang chính thức qua công cụ tính hoá đơn EVN (calc.evn.com.vn)
+- `Tháng trước` *(entity riêng)* — state dạng "Tháng 6/2026" (thực chất là kỳ hóa đơn **ĐÃ CHỐT** gần nhất - có thể không đúng nghĩa đen "tháng dương lịch trước" nếu ngày chốt sổ lệch)
+- `Tiêu thụ tháng trước` (kWh)
+- `Tiền điện tháng trước` (VNĐ)
+- `Tiêu thụ cùng kỳ năm trước (so với tháng trước)` (kWh) — so với **Tháng trước**, KHÔNG PHẢI Tháng hiện tại
+- `Tiền điện cùng kỳ năm trước (so với tháng trước)` (VNĐ) — tương tự
 
-Tên các sensor số liệu (tiêu thụ/tiền điện) là **tên tĩnh, cố định** —
-muốn biết đang thuộc tháng nào thì xem 2 entity riêng `Kỳ hóa đơn gần
-nhất` và `Tháng hiện tại (đang chạy)` ở trên, hoặc xem attribute
-"Tháng"/"Năm" của từng sensor.
+## Đã bỏ
+
+- Sensor "Lịch sử hóa đơn theo tháng" và "Lịch sử treo tháo công tơ" đã bị
+  xoá khỏi danh sách entity (không cần thiết cho mục đích theo dõi hàng
+  ngày). Dữ liệu API `thongTinHoaDonSpider` vẫn được coordinator lấy về
+  bình thường để phục vụ tính "Tháng trước"/"cùng kỳ năm trước", chỉ là
+  không còn lộ ra thành entity riêng để xem toàn bộ lịch sử nữa.
+- API `biendongtreothao` (treo tháo công tơ) không còn được gọi mỗi chu
+  kỳ nữa, giảm 1 request không cần thiết.
+- Sensor "Giờ server EVN" cũng đã bỏ (đã bỏ ở bản trước) - vẫn dùng ngầm
+  bên trong để tính "Tháng hiện tại"/"Tiêu thụ tháng hiện tại" chính xác.
 
 ### ⚠️ Lưu ý quan trọng: "tháng này" vs "kỳ hóa đơn gần nhất"
 

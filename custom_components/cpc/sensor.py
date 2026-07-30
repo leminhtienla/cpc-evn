@@ -6,7 +6,6 @@ from typing import Optional
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -48,13 +47,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         CPCTodayYesterdaySensor(coordinator, customer_code),
         CPCCurrentPeriodSensor(coordinator, customer_code),
         CPCCurrentMonthRunningSensor(coordinator, customer_code),
+        CPCBillEstimateSensor(coordinator, customer_code),
         CPCLatestBillPeriodSensor(coordinator, customer_code),
         CPCMonthlyConsumptionSensor(coordinator, customer_code),
         CPCMonthlyCostSensor(coordinator, customer_code),
         CPCLastYearConsumptionSensor(coordinator, customer_code),
         CPCLastYearCostSensor(coordinator, customer_code),
-        CPCBillHistorySensor(coordinator, customer_code),
-        CPCMeterChangeHistorySensor(coordinator, customer_code),
     ]
     async_add_entities(entities)
 
@@ -211,7 +209,7 @@ class CPCLatestBillPeriodSensor(CPCBaseSensor):
     """
 
     _sensor_key = "ky_hoa_don_gan_nhat"
-    _attr_name = "Kỳ hóa đơn gần nhất"
+    _attr_name = "Tháng trước"
     _attr_icon = "mdi:calendar-check"
 
     @property
@@ -235,7 +233,7 @@ class CPCMonthlyConsumptionSensor(CPCBaseSensor):
     """Sản lượng tiêu thụ tháng/kỳ hóa đơn gần nhất (kWh)."""
 
     _sensor_key = "tieu_thu_ky_hoa_don_gan_nhat"
-    _attr_name = "Tiêu thụ kỳ hóa đơn gần nhất"
+    _attr_name = "Tiêu thụ tháng trước"
     _attr_native_unit_of_measurement = "kWh"
     _attr_icon = "mdi:transmission-tower-export"
 
@@ -258,7 +256,7 @@ class CPCMonthlyConsumptionSensor(CPCBaseSensor):
             "Ngày cuối kỳ": latest.get("NGAY_CKY"),
             "Chỉ số đầu kỳ": latest.get("CHISO_CU"),
             "Chỉ số cuối kỳ": latest.get("CHISO_MOI"),
-            "Lưu ý": "Đây là kỳ hóa đơn ĐÃ CHỐT gần nhất (đã có tiền điện chính thức), không phải tháng dương lịch hiện tại đang chạy. Xem sensor 'Tiêu thụ tháng này' để có số liệu tháng hiện tại (chưa chốt, chưa có tiền điện).",
+            "Lưu ý": "Đây là kỳ hóa đơn ĐÃ CHỐT gần nhất (đã có tiền điện chính thức) - xem entity 'Tháng trước' để biết chính xác là tháng/năm nào.",
         }
 
 
@@ -266,7 +264,7 @@ class CPCMonthlyCostSensor(CPCBaseSensor):
     """Tiền điện kỳ hóa đơn ĐÃ CHỐT gần nhất (VNĐ)."""
 
     _sensor_key = "tien_dien_ky_hoa_don_gan_nhat"
-    _attr_name = "Tiền điện kỳ hóa đơn gần nhất"
+    _attr_name = "Tiền điện tháng trước"
     _attr_native_unit_of_measurement = "VNĐ"
     _attr_icon = "mdi:cash-multiple"
 
@@ -296,7 +294,7 @@ class CPCCurrentPeriodSensor(CPCBaseSensor):
     """
 
     _sensor_key = "thang_hien_tai"
-    _attr_name = "Tháng hiện tại (đang chạy)"
+    _attr_name = "Tháng hiện tại"
     _attr_icon = "mdi:calendar-clock"
 
     @property
@@ -318,7 +316,7 @@ class CPCCurrentMonthRunningSensor(CPCBaseSensor):
     """
 
     _sensor_key = "tieu_thu_thang_nay"
-    _attr_name = "Tiêu thụ tháng này"
+    _attr_name = "Tiêu thụ tháng hiện tại"
     _attr_native_unit_of_measurement = "kWh"
     _attr_icon = "mdi:calendar-clock"
 
@@ -353,15 +351,61 @@ class CPCCurrentMonthRunningSensor(CPCBaseSensor):
             "Tháng": thang,
             "Năm": nam,
             "Nguồn": "cskh.cpc.vn (power-consumption-alerts)",
-            "Lưu ý": "Tháng đang chạy, chưa chốt kỳ nên CHƯA CÓ tiền điện. Xem sensor 'Tiêu thụ kỳ hóa đơn gần nhất' để biết tiền điện của kỳ đã chốt gần nhất.",
+            "Lưu ý": "Tháng đang chạy, chưa chốt kỳ nên CHƯA CÓ tiền điện. Xem sensor 'Tiêu thụ tháng trước' để biết tiền điện của kỳ đã chốt gần nhất.",
+        }
+
+
+class CPCBillEstimateSensor(CPCBaseSensor):
+    """Dự tính tiền điện CẢ THÁNG hiện tại - ngoại suy từ kWh đã dùng tới
+    nay ra hết kỳ, rồi tính theo đúng biểu giá bậc thang sinh hoạt hiện
+    hành qua công cụ tính hoá đơn CHÍNH THỨC của EVN (calc.evn.com.vn).
+
+    Đây là ƯỚC TÍNH dựa trên giả định mức tiêu thụ trung bình mỗi ngày
+    không đổi tới hết kỳ - số thực tế có thể khác nếu thói quen dùng điện
+    thay đổi (ví dụ dùng điều hoà nhiều hơn vào cuối tháng nóng hơn).
+    """
+
+    _sensor_key = "du_tinh_tien_dien_thang_nay"
+    _attr_name = "Dự tính tiền điện tháng hiện tại"
+    _attr_native_unit_of_measurement = "VNĐ"
+    _attr_icon = "mdi:calculator"
+
+    @property
+    def _est(self) -> dict:
+        return (self.coordinator.data or {}).get("bill_estimate") or {}
+
+    @property
+    def native_value(self):
+        est = self._est
+        tong = est.get("tong_tien_du_tinh")
+        return round(tong) if tong is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        est = self._est
+        if not est:
+            return {}
+        return {
+            "Đã dùng tới hiện tại (kWh)": est.get("kwh_da_dung"),
+            "Dự tính cả kỳ (kWh)": est.get("kwh_du_tinh_ca_ky"),
+            "Số ngày đã qua / tổng số ngày kỳ": f"{est.get('so_ngay_da_qua')}/{est.get('so_ngay_ky')}",
+            "Ngày đầu kỳ (ước tính)": est.get("ngay_dau_ky"),
+            "Ngày cuối kỳ (ước tính)": est.get("ngay_cuoi_ky_du_kien"),
+            "Tiền điện trước thuế (VNĐ)": est.get("tien_truoc_thue"),
+            "Thuế GTGT (VNĐ)": est.get("tien_thue"),
+            "Nguồn": "calc.evn.com.vn (công cụ tính hoá đơn chính thức của EVN)",
+            "Lưu ý": "Đây là ƯỚC TÍNH - giả định mức dùng điện trung bình/ngày không đổi tới hết kỳ. Ngày đầu/cuối kỳ cũng là ước tính dựa trên độ dài kỳ trước, có thể lệch vài ngày so với ngày EVN thực sự ghi công tơ.",
         }
 
 
 class CPCLastYearConsumptionSensor(CPCBaseSensor):
-    """Sản lượng cùng tháng, năm trước (kWh) - so sánh với kỳ hóa đơn đã chốt gần nhất."""
+    """Sản lượng cùng THÁNG với 'Tháng trước' (kỳ hóa đơn đã chốt gần
+    nhất), nhưng của NĂM TRƯỚC. Ví dụ 'Tháng trước' đang là tháng 6/2026
+    thì sensor này là tháng 6/2025 - KHÔNG PHẢI so với tháng hiện tại.
+    """
 
     _sensor_key = "tieu_thu_cung_ky_nam_truoc"
-    _attr_name = "Tiêu thụ cùng kỳ năm trước"
+    _attr_name = "Tiêu thụ cùng kỳ năm trước (so với tháng trước)"
     _attr_native_unit_of_measurement = "kWh"
     _attr_icon = "mdi:transmission-tower-export"
 
@@ -382,14 +426,18 @@ class CPCLastYearConsumptionSensor(CPCBaseSensor):
         same = self._same()
         if not same:
             return {}
-        return {"Tháng": same.get("THANG"), "Năm": same.get("NAM")}
+        return {
+            "Tháng": same.get("THANG"),
+            "Năm": same.get("NAM"),
+            "Lưu ý": "So sánh với 'Tháng trước' (kỳ hóa đơn đã chốt gần nhất), KHÔNG PHẢI với 'Tháng hiện tại' đang chạy.",
+        }
 
 
 class CPCLastYearCostSensor(CPCBaseSensor):
-    """Tiền điện cùng tháng, năm trước (VNĐ)."""
+    """Tiền điện cùng THÁNG với 'Tháng trước', nhưng của NĂM TRƯỚC."""
 
     _sensor_key = "tien_dien_cung_ky_nam_truoc"
-    _attr_name = "Tiền điện cùng kỳ năm trước"
+    _attr_name = "Tiền điện cùng kỳ năm trước (so với tháng trước)"
     _attr_native_unit_of_measurement = "VNĐ"
     _attr_icon = "mdi:cash-multiple"
 
@@ -410,75 +458,10 @@ class CPCLastYearCostSensor(CPCBaseSensor):
         same = self._same()
         if not same:
             return {}
-        return {"Tháng": same.get("THANG"), "Năm": same.get("NAM")}
-
-
-class CPCBillHistorySensor(CPCBaseSensor):
-    """Toàn bộ lịch sử hóa đơn theo tháng (có thể tới hàng chục năm).
-
-    State chỉ là SỐ LƯỢNG bản ghi (để biết có dữ liệu hay không) - dữ liệu
-    thật sự nằm trong attribute "Chi tiết". Đánh dấu DIAGNOSTIC để HA gom
-    riêng, không lẫn với các sensor số liệu chính trên trang thiết bị.
-    """
-
-    _sensor_key = "lich_su_hoa_don"
-    _attr_name = "Lịch sử hóa đơn theo tháng"
-    _attr_icon = "mdi:calendar-month"
-    _attr_native_unit_of_measurement = "bản ghi"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self):
-        bills = (self.coordinator.data or {}).get("bill_history", [])
-        return len(bills)
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        bills = (self.coordinator.data or {}).get("bill_history", [])
         return {
-            "Chi tiết": [
-                {
-                    "Tháng": r.get("THANG"),
-                    "Năm": r.get("NAM"),
-                    "Tiêu thụ (kWh)": r.get("DIEN_TTHU"),
-                    "Tiền điện (VNĐ)": r.get("TONG_TIEN"),
-                    "Chỉ số đầu kỳ": r.get("CHISO_CU"),
-                    "Chỉ số cuối kỳ": r.get("CHISO_MOI"),
-                }
-                for r in sorted(bills, key=lambda r: (r.get("NAM", 0), r.get("THANG", 0)), reverse=True)
-            ]
+            "Tháng": same.get("THANG"),
+            "Năm": same.get("NAM"),
+            "Lưu ý": "So sánh với 'Tháng trước' (kỳ hóa đơn đã chốt gần nhất), KHÔNG PHẢI với 'Tháng hiện tại' đang chạy.",
         }
 
 
-class CPCMeterChangeHistorySensor(CPCBaseSensor):
-    """Lịch sử treo tháo / thay công tơ (biendongtreothao).
-
-    State chỉ là SỐ LƯỢNG lần treo tháo - dữ liệu thật nằm trong attribute
-    "Chi tiết". Đánh dấu DIAGNOSTIC vì lý do tương tự sensor lịch sử hóa đơn.
-    """
-
-    _sensor_key = "lich_su_treo_thao_cong_to"
-    _attr_name = "Lịch sử treo tháo công tơ"
-    _attr_icon = "mdi:electric-switch"
-    _attr_native_unit_of_measurement = "lần"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self):
-        changes = (self.coordinator.data or {}).get("meter_changes", [])
-        return len(changes)
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        changes = (self.coordinator.data or {}).get("meter_changes", [])
-        return {
-            "Chi tiết": [
-                {
-                    "Ngày": r.get("NGAY_BDONG", "")[:10],
-                    "Số công tơ": r.get("SO_CTO"),
-                    "Loại biến động": "Lắp mới" if r.get("MA_BDONG") == "B" else "Tháo" if r.get("MA_BDONG") == "E" else r.get("MA_BDONG"),
-                    "Lý do": r.get("TEN_LDO"),
-                }
-                for r in sorted(changes, key=lambda r: r.get("NGAY_BDONG") or "", reverse=True)
-            ]
-        }

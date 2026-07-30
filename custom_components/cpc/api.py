@@ -6,6 +6,7 @@ Toàn bộ endpoint trong file này được xác nhận từ HAR capture thực
 """
 
 import logging
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
 import aiohttp
@@ -15,6 +16,14 @@ _LOGGER = logging.getLogger(__name__)
 BASE_URL = "https://cskh-api.cpc.vn"
 LOGIN_URL = f"{BASE_URL}/api/cskh/user/login"
 REFERER = "https://cskh.cpc.vn/"
+
+# Công cụ tính hoá đơn điện CHÍNH THỨC của EVN toàn quốc (calc.evn.com.vn),
+# domain KHÁC hẳn cskh-api.cpc.vn, KHÔNG cần đăng nhập (public API, không
+# có Authorization header trong request thực tế bắt được). Dùng để dự
+# tính tiền điện dựa trên số kWh tiêu thụ, áp dụng đúng biểu giá bậc
+# thang sinh hoạt hiện hành. Đã đối chiếu khớp chính xác tới từng đồng
+# với hoá đơn thật (134 kWh -> 305,230 VNĐ).
+BILL_CALC_URL = "https://calc.evn.com.vn/TinhHoaDon/api/Calculate"
 
 
 class CPCAuthError(Exception):
@@ -191,6 +200,102 @@ class CPCApi:
         result = data.get("result") or []
         return result
 
+    async def estimate_bill(self, san_luong_kwh: float, ngay_dky: date, ngay_cky: date, so_ho: int = 1) -> Optional[Dict[str, Any]]:
+        """Gọi công cụ tính hoá đơn CHÍNH THỨC của EVN (calc.evn.com.vn) để
+        tính tiền điện ứng với 1 mức tiêu thụ (kWh) cho trước, theo đúng
+        biểu giá bậc thang sinh hoạt hiện hành - KHÔNG cần đăng nhập.
+
+        ngay_dky/ngay_cky: ngày đầu/cuối kỳ (dùng để xác định số ngày
+        trong kỳ - biểu giá bậc thang co giãn theo số ngày, ví dụ kỳ 2
+        tháng thì các bậc nhân đôi).
+
+        Trả về dict gốc từ EVN (có HDN_HDON[0] chứa SO_TIEN, TIEN_GTGT,
+        TONG_TIEN...) hoặc None nếu lỗi.
+        """
+        payload = {
+            "KIMUA_CSPK": "0",
+            "LOAI_DDO": "1",
+            "SO_HO": so_ho,
+            "MA_CAPDAP": "1",
+            "NGAY_DKY": ngay_dky.strftime("%d/%m/%Y"),
+            "NGAY_CKY": ngay_cky.strftime("%d/%m/%Y"),
+            "NGAY_DGIA": "01/01/1900",
+            "HDG_BBAN_APGIA": [
+                {
+                    "LOAI_BCS": "KT",
+                    "TGIAN_BANDIEN": "KT",
+                    "MA_NHOMNN": "SHBT",
+                    "MA_NGIA": "A",
+                }
+            ],
+            "GCS_CHISO": [
+                {
+                    "BCS": "KT",
+                    "SAN_LUONG": str(round(san_luong_kwh, 2)),
+                    "LOAI_CHISO": "DDK",
+                }
+            ],
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://calc.evn.com.vn/",
+            "Origin": "https://calc.evn.com.vn",
+        }
+        try:
+            async with self._session.post(BILL_CALC_URL, json=payload, headers=headers, ssl=False) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    _LOGGER.debug(f"estimate_bill failed HTTP {resp.status}: {text[:300]}")
+                    return None
+                data = await resp.json()
+        except aiohttp.ClientError as err:
+            _LOGGER.debug(f"estimate_bill connection error: {err}")
+            return None
+
+        bills = (data.get("Data") or {}).get("HDN_HDON") or []
+        if not bills:
+            return None
+        return bills[0]
+
+
+    def _current_period_bounds(self, bill_history: List[Dict[str, Any]]) -> tuple:
+        """Ước tính ngày đầu/cuối kỳ HIỆN TẠI (đang chạy, chưa chốt) dựa
+        trên kỳ ĐÃ CHỐT gần nhất: kỳ mới bắt đầu ngay sau ngày chốt kỳ
+        trước, độ dài kỳ giả định bằng độ dài kỳ trước (thường ~30 ngày).
+        Nếu chưa có kỳ nào (khách hàng mới), fallback về tháng dương lịch
+        hiện tại theo giờ server.
+        """
+        latest = None
+        if bill_history:
+            latest = sorted(bill_history, key=lambda r: (r.get("NAM", 0), r.get("THANG", 0)))[-1]
+        today = date.today()
+        if self.server_time_header:
+            try:
+                from email.utils import parsedate_to_datetime
+                today = parsedate_to_datetime(self.server_time_header).date()
+            except (TypeError, ValueError):
+                pass
+
+        if latest and latest.get("NGAY_CKY"):
+            try:
+                ngay_dky_truoc = date.fromisoformat(latest["NGAY_DKY"][:10])
+                ngay_cky_truoc = date.fromisoformat(latest["NGAY_CKY"][:10])
+                do_dai_ky = (ngay_cky_truoc - ngay_dky_truoc).days + 1
+                start = ngay_cky_truoc + timedelta(days=1)
+                end = start + timedelta(days=do_dai_ky - 1)
+                return start, end, today
+            except (ValueError, TypeError, KeyError):
+                pass
+
+        # Fallback: tháng dương lịch hiện tại
+        start = today.replace(day=1)
+        if today.month == 12:
+            end = date(today.year, 12, 31)
+        else:
+            end = date(today.year, today.month + 1, 1) - timedelta(days=1)
+        return start, end, today
+
     async def async_fetch_all(self) -> Dict[str, Any]:
         """Lấy toàn bộ dữ liệu 1 lần, dùng cho coordinator."""
         customer_info = await self.get_customer_info()
@@ -198,13 +303,39 @@ class CPCApi:
         bill_history = await self.get_bill_history()
         daily_view = await self.get_daily_view()
         consumption_summary = await self.get_consumption_summary()
-        meter_changes = await self.get_meter_change_history()
+
+        bill_estimate = None
+        period_start, period_end, today_ref = self._current_period_bounds(bill_history)
+        kwh_so_far = None
+        if consumption_summary:
+            kwh_so_far = (consumption_summary.get("electricConsumption") or {}).get("electricConsumptionThisMonth")
+
+        if kwh_so_far is not None and kwh_so_far > 0:
+            so_ngay_ky = (period_end - period_start).days + 1
+            so_ngay_da_qua = max((today_ref - period_start).days + 1, 1)
+            so_ngay_da_qua = min(so_ngay_da_qua, so_ngay_ky)
+            kwh_du_tinh_ca_ky = kwh_so_far / so_ngay_da_qua * so_ngay_ky
+
+            bill_result = await self.estimate_bill(kwh_du_tinh_ca_ky, period_start, period_end)
+            if bill_result:
+                bill_estimate = {
+                    "kwh_da_dung": kwh_so_far,
+                    "kwh_du_tinh_ca_ky": round(kwh_du_tinh_ca_ky, 2),
+                    "so_ngay_da_qua": so_ngay_da_qua,
+                    "so_ngay_ky": so_ngay_ky,
+                    "ngay_dau_ky": period_start.isoformat(),
+                    "ngay_cuoi_ky_du_kien": period_end.isoformat(),
+                    "tien_truoc_thue": bill_result.get("SO_TIEN"),
+                    "tien_thue": bill_result.get("TIEN_GTGT"),
+                    "tong_tien_du_tinh": bill_result.get("TONG_TIEN"),
+                }
+
         return {
             "customer_info": customer_info,
             "index_log": index_log,
             "bill_history": bill_history,
             "daily_view": daily_view,
             "consumption_summary": consumption_summary,
-            "meter_changes": meter_changes,
             "server_time_header": self.server_time_header,
+            "bill_estimate": bill_estimate,
         }
