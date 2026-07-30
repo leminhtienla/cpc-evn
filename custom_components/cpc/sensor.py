@@ -146,10 +146,17 @@ class CPCServerTimeSensor(CPCBaseSensor):
 
 
 class CPCDailyBreakdownSensor(CPCBaseSensor):
-    """Tiêu thụ theo TỪNG NGÀY - từ API chính thức sl-tieu-thu-view của EVN."""
+    """Tổng tiêu thụ dồn từ đầu kỳ hóa đơn hiện tại tới nay - cộng dồn từ
+    bảng theo ngày chính thức của EVN (sl-tieu-thu-view).
+
+    State KHÔNG phải "hôm nay" (xem sensor 'Tiêu thụ hôm nay' cho số đó) -
+    đây là tổng của TẤT CẢ các ngày có trong kỳ hiện tại, để tránh trùng
+    số với sensor hôm nay. Bảng chi tiết từng ngày nằm trong attribute
+    "Chi tiết".
+    """
 
     _sensor_key = "tieu_thu_theo_ngay"
-    _attr_name = "Tiêu thụ theo ngày"
+    _attr_name = "Tổng tiêu thụ dồn kỳ này (theo ngày)"
     _attr_native_unit_of_measurement = "kWh"
     _attr_icon = "mdi:calendar-today"
 
@@ -158,8 +165,7 @@ class CPCDailyBreakdownSensor(CPCBaseSensor):
         daily_view = (self.coordinator.data or {}).get("daily_view", [])
         if not daily_view:
             return None
-        latest = sorted(daily_view, key=lambda r: r.get("ngay") or "")[-1]
-        return latest.get("sanLuongNgay")
+        return round(sum(r.get("sanLuongNgay") or 0 for r in daily_view), 2)
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -169,7 +175,9 @@ class CPCDailyBreakdownSensor(CPCBaseSensor):
         sorted_rows = sorted(daily_view, key=lambda r: r.get("ngay") or "", reverse=True)
         latest = sorted_rows[0]
         return {
+            "Số ngày có dữ liệu": len(sorted_rows),
             "Ngày gần nhất": latest.get("ngay", "")[:10],
+            "Tiêu thụ ngày gần nhất (kWh)": latest.get("sanLuongNgay"),
             "Chi tiết": [
                 {
                     "Ngày": r.get("ngay", "")[:10],
@@ -232,9 +240,16 @@ class CPCMonthlyConsumptionSensor(CPCBaseSensor):
     """Sản lượng tiêu thụ tháng/kỳ hóa đơn gần nhất (kWh)."""
 
     _sensor_key = "tieu_thu_ky_hoa_don_gan_nhat"
-    _attr_name = "Tiêu thụ kỳ hóa đơn gần nhất"
     _attr_native_unit_of_measurement = "kWh"
     _attr_icon = "mdi:transmission-tower-export"
+
+    @property
+    def name(self):
+        bills = (self.coordinator.data or {}).get("bill_history", [])
+        latest = _latest_bill(bills)
+        if latest:
+            return f"Tiêu thụ kỳ hóa đơn tháng {latest.get('THANG')}/{latest.get('NAM')}"
+        return "Tiêu thụ kỳ hóa đơn gần nhất"
 
     @property
     def native_value(self):
@@ -263,9 +278,16 @@ class CPCMonthlyCostSensor(CPCBaseSensor):
     """Tiền điện kỳ hóa đơn ĐÃ CHỐT gần nhất (VNĐ)."""
 
     _sensor_key = "tien_dien_ky_hoa_don_gan_nhat"
-    _attr_name = "Tiền điện kỳ hóa đơn gần nhất"
     _attr_native_unit_of_measurement = "VNĐ"
     _attr_icon = "mdi:cash-multiple"
+
+    @property
+    def name(self):
+        bills = (self.coordinator.data or {}).get("bill_history", [])
+        latest = _latest_bill(bills)
+        if latest:
+            return f"Tiền điện kỳ hóa đơn tháng {latest.get('THANG')}/{latest.get('NAM')}"
+        return "Tiền điện kỳ hóa đơn gần nhất"
 
     @property
     def native_value(self):
@@ -294,9 +316,26 @@ class CPCCurrentMonthRunningSensor(CPCBaseSensor):
     """
 
     _sensor_key = "tieu_thu_thang_nay"
-    _attr_name = "Tiêu thụ tháng này"
     _attr_native_unit_of_measurement = "kWh"
     _attr_icon = "mdi:calendar-clock"
+
+    @property
+    def _server_month_year(self):
+        server_header = (self.coordinator.data or {}).get("server_time_header")
+        if server_header:
+            try:
+                dt = parsedate_to_datetime(server_header)
+                return dt.month, dt.year
+            except (TypeError, ValueError):
+                pass
+        return None, None
+
+    @property
+    def name(self):
+        thang, nam = self._server_month_year
+        if thang and nam:
+            return f"Tiêu thụ tháng {thang}/{nam} (đang chạy)"
+        return "Tiêu thụ tháng này"
 
     @property
     def _ec(self) -> dict:
@@ -313,17 +352,7 @@ class CPCCurrentMonthRunningSensor(CPCBaseSensor):
     def extra_state_attributes(self) -> dict:
         if not self._ec:
             return {}
-        # power-consumption-alerts KHÔNG trả kèm tháng/năm - suy ra từ giờ
-        # server EVN (chính xác hơn giờ local HA, tránh lệch múi giờ/lệch
-        # ngày lúc gần giao thời). Nếu chưa có giờ server thì bỏ trống.
-        thang, nam = None, None
-        server_header = (self.coordinator.data or {}).get("server_time_header")
-        if server_header:
-            try:
-                server_dt = parsedate_to_datetime(server_header)
-                thang, nam = server_dt.month, server_dt.year
-            except (TypeError, ValueError):
-                pass
+        thang, nam = self._server_month_year
         return {
             "Tháng": thang,
             "Năm": nam,
@@ -336,26 +365,31 @@ class CPCLastYearConsumptionSensor(CPCBaseSensor):
     """Sản lượng cùng tháng, năm trước (kWh) - so sánh với kỳ hóa đơn đã chốt gần nhất."""
 
     _sensor_key = "tieu_thu_cung_ky_nam_truoc"
-    _attr_name = "Tiêu thụ cùng kỳ năm trước"
     _attr_native_unit_of_measurement = "kWh"
     _attr_icon = "mdi:transmission-tower-export"
 
-    @property
-    def native_value(self):
+    def _same(self):
         bills = (self.coordinator.data or {}).get("bill_history", [])
         latest = _latest_bill(bills)
         if not latest:
             return None
-        same = _same_period_last_year(bills, latest.get("THANG"), latest.get("NAM"))
+        return _same_period_last_year(bills, latest.get("THANG"), latest.get("NAM"))
+
+    @property
+    def name(self):
+        same = self._same()
+        if same:
+            return f"Tiêu thụ cùng kỳ tháng {same.get('THANG')}/{same.get('NAM')}"
+        return "Tiêu thụ cùng kỳ năm trước"
+
+    @property
+    def native_value(self):
+        same = self._same()
         return same.get("DIEN_TTHU") if same else None
 
     @property
     def extra_state_attributes(self) -> dict:
-        bills = (self.coordinator.data or {}).get("bill_history", [])
-        latest = _latest_bill(bills)
-        if not latest:
-            return {}
-        same = _same_period_last_year(bills, latest.get("THANG"), latest.get("NAM"))
+        same = self._same()
         if not same:
             return {}
         return {"Tháng": same.get("THANG"), "Năm": same.get("NAM")}
@@ -365,26 +399,31 @@ class CPCLastYearCostSensor(CPCBaseSensor):
     """Tiền điện cùng tháng, năm trước (VNĐ)."""
 
     _sensor_key = "tien_dien_cung_ky_nam_truoc"
-    _attr_name = "Tiền điện cùng kỳ năm trước"
     _attr_native_unit_of_measurement = "VNĐ"
     _attr_icon = "mdi:cash-multiple"
 
-    @property
-    def native_value(self):
+    def _same(self):
         bills = (self.coordinator.data or {}).get("bill_history", [])
         latest = _latest_bill(bills)
         if not latest:
             return None
-        same = _same_period_last_year(bills, latest.get("THANG"), latest.get("NAM"))
+        return _same_period_last_year(bills, latest.get("THANG"), latest.get("NAM"))
+
+    @property
+    def name(self):
+        same = self._same()
+        if same:
+            return f"Tiền điện cùng kỳ tháng {same.get('THANG')}/{same.get('NAM')}"
+        return "Tiền điện cùng kỳ năm trước"
+
+    @property
+    def native_value(self):
+        same = self._same()
         return same.get("TONG_TIEN") if same else None
 
     @property
     def extra_state_attributes(self) -> dict:
-        bills = (self.coordinator.data or {}).get("bill_history", [])
-        latest = _latest_bill(bills)
-        if not latest:
-            return {}
-        same = _same_period_last_year(bills, latest.get("THANG"), latest.get("NAM"))
+        same = self._same()
         if not same:
             return {}
         return {"Tháng": same.get("THANG"), "Năm": same.get("NAM")}

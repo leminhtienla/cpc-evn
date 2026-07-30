@@ -41,14 +41,17 @@ Tất cả endpoint dưới đây được xác nhận bằng cách bắt reques
 
 - `Chỉ số thời gian thực` (kWh) — chỉ số công tơ mới nhất
 - `Giờ server EVN` — giờ hiện tại theo server (từ header HTTP `Date`), dùng đối chiếu khi nghi ngờ lệch múi giờ/lệch ngày
-- `Tiêu thụ theo ngày` (kWh) — API chính thức EVN, attribute `Chi tiết` chứa toàn bộ bảng ngày
+- `Tổng tiêu thụ dồn kỳ này (theo ngày)` (kWh) — tổng cộng dồn từ đầu kỳ hóa đơn hiện tại tới nay, attribute `Chi tiết` chứa bảng đầy đủ từng ngày
 - `Tiêu thụ hôm nay` (kWh) — kèm attribute hôm qua, tháng này, tháng trước, ngưỡng cảnh báo
-- `Tiêu thụ tháng này` (kWh) — **tháng dương lịch đang chạy**, chưa chốt kỳ nên **chưa có tiền điện**
-- `Tiêu thụ kỳ hóa đơn gần nhất` (kWh) — kỳ **ĐÃ CHỐT** gần nhất (có thể là tháng trước, tùy ngày chốt sổ), có đủ chỉ số đầu/cuối kỳ
-- `Tiền điện kỳ hóa đơn gần nhất` (VNĐ) — tiền điện chính thức của kỳ đã chốt ở trên
-- `Tiêu thụ cùng kỳ năm trước` / `Tiền điện cùng kỳ năm trước` — so sánh với cùng THÁNG của kỳ hóa đơn gần nhất ở trên (không phải so với "tháng này" đang chạy)
+- `Tiêu thụ tháng X/Y (đang chạy)` (kWh) — tên tự nhúng tháng/năm hiện tại (theo giờ server), chưa chốt kỳ nên **chưa có tiền điện**
+- `Tiêu thụ/Tiền điện kỳ hóa đơn tháng X/Y` — tên tự nhúng đúng tháng/năm của kỳ **ĐÃ CHỐT** gần nhất
+- `Tiêu thụ/Tiền điện cùng kỳ tháng X/Y` — tên tự nhúng đúng tháng/năm cùng kỳ năm trước (so với kỳ đã chốt ở trên)
 - `Lịch sử hóa đơn theo tháng` — attribute chứa toàn bộ lịch sử (có thể nhiều năm)
 - `Lịch sử treo tháo công tơ` — attribute chứa lịch sử thay/lắp công tơ
+
+Tên các sensor tháng/kỳ hóa đơn ở trên là **tên động** - tự cập nhật theo
+tháng/năm thực tế mỗi khi coordinator refresh, không cần đoán qua
+attribute nữa.
 
 ### ⚠️ Lưu ý quan trọng: "tháng này" vs "kỳ hóa đơn gần nhất"
 
