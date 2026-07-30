@@ -5,6 +5,7 @@ from typing import Optional
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -299,11 +300,18 @@ class CPCLastYearCostSensor(CPCBaseSensor):
 
 
 class CPCBillHistorySensor(CPCBaseSensor):
-    """Toàn bộ lịch sử hóa đơn theo tháng (có thể tới hàng chục năm)."""
+    """Toàn bộ lịch sử hóa đơn theo tháng (có thể tới hàng chục năm).
+
+    State chỉ là SỐ LƯỢNG bản ghi (để biết có dữ liệu hay không) - dữ liệu
+    thật sự nằm trong attribute "Chi tiết". Đánh dấu DIAGNOSTIC để HA gom
+    riêng, không lẫn với các sensor số liệu chính trên trang thiết bị.
+    """
 
     _sensor_key = "lich_su_hoa_don"
     _attr_name = "Lịch sử hóa đơn theo tháng"
     _attr_icon = "mdi:calendar-month"
+    _attr_native_unit_of_measurement = "bản ghi"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self):
@@ -329,11 +337,17 @@ class CPCBillHistorySensor(CPCBaseSensor):
 
 
 class CPCMeterChangeHistorySensor(CPCBaseSensor):
-    """Lịch sử treo tháo / thay công tơ (biendongtreothao)."""
+    """Lịch sử treo tháo / thay công tơ (biendongtreothao).
+
+    State chỉ là SỐ LƯỢNG lần treo tháo - dữ liệu thật nằm trong attribute
+    "Chi tiết". Đánh dấu DIAGNOSTIC vì lý do tương tự sensor lịch sử hóa đơn.
+    """
 
     _sensor_key = "lich_su_treo_thao_cong_to"
     _attr_name = "Lịch sử treo tháo công tơ"
     _attr_icon = "mdi:electric-switch"
+    _attr_native_unit_of_measurement = "lần"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self):
