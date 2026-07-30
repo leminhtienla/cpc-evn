@@ -301,7 +301,6 @@ class CPCApi:
         customer_info = await self.get_customer_info()
         index_log = await self.get_index_log()
         bill_history = await self.get_bill_history()
-        daily_view = await self.get_daily_view()
         consumption_summary = await self.get_consumption_summary()
 
         bill_estimate = None
@@ -334,7 +333,6 @@ class CPCApi:
             "customer_info": customer_info,
             "index_log": index_log,
             "bill_history": bill_history,
-            "daily_view": daily_view,
             "consumption_summary": consumption_summary,
             "server_time_header": self.server_time_header,
             "bill_estimate": bill_estimate,

@@ -43,7 +43,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     entities = [
         CPCRealtimeSensor(coordinator, customer_code),
-        CPCDailyBreakdownSensor(coordinator, customer_code),
         CPCTodayYesterdaySensor(coordinator, customer_code),
         CPCCurrentPeriodSensor(coordinator, customer_code),
         CPCCurrentMonthRunningSensor(coordinator, customer_code),
@@ -109,52 +108,6 @@ class CPCRealtimeSensor(CPCBaseSensor):
             "Thời điểm đọc": latest.get("NGAYGIO"),
             "Số công tơ": latest.get("SO_CTO"),
             "Nguồn": "cskh.cpc.vn (spider/thongTinChiSo)",
-        }
-
-
-class CPCDailyBreakdownSensor(CPCBaseSensor):
-    """Tổng tiêu thụ dồn từ đầu kỳ hóa đơn hiện tại tới nay - cộng dồn từ
-    bảng theo ngày chính thức của EVN (sl-tieu-thu-view).
-
-    State KHÔNG phải "hôm nay" (xem sensor 'Tiêu thụ hôm nay' cho số đó) -
-    đây là tổng của TẤT CẢ các ngày có trong kỳ hiện tại, để tránh trùng
-    số với sensor hôm nay. Bảng chi tiết từng ngày nằm trong attribute
-    "Chi tiết".
-    """
-
-    _sensor_key = "tong_tieu_thu_don_ky_nay"
-    _attr_name = "Tổng tiêu thụ dồn kỳ này (theo ngày)"
-    _attr_native_unit_of_measurement = "kWh"
-    _attr_icon = "mdi:calendar-today"
-
-    @property
-    def native_value(self):
-        daily_view = (self.coordinator.data or {}).get("daily_view", [])
-        if not daily_view:
-            return None
-        return round(sum(r.get("sanLuongNgay") or 0 for r in daily_view), 2)
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        daily_view = (self.coordinator.data or {}).get("daily_view", [])
-        if not daily_view:
-            return {}
-        sorted_rows = sorted(daily_view, key=lambda r: r.get("ngay") or "", reverse=True)
-        latest = sorted_rows[0]
-        return {
-            "Số ngày có dữ liệu": len(sorted_rows),
-            "Ngày gần nhất": latest.get("ngay", "")[:10],
-            "Tiêu thụ ngày gần nhất (kWh)": latest.get("sanLuongNgay"),
-            "Chi tiết": [
-                {
-                    "Ngày": r.get("ngay", "")[:10],
-                    "Tiêu thụ (kWh)": r.get("sanLuongNgay"),
-                    "Trung bình cộng dồn từ đầu kỳ (kWh)": r.get("sanLuongTrungBinh"),
-                }
-                for r in sorted_rows
-            ],
-            "Nguồn": "cskh.cpc.vn (meter/rf/sl-tieu-thu-view) - API chính thức của EVN, không phải tự tính",
-            "Ghi chú của EVN": latest.get("message"),
         }
 
 

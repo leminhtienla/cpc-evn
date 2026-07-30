@@ -40,7 +40,6 @@ Tất cả endpoint dưới đây được xác nhận bằng cách bắt reques
 ## Sensors
 
 - `Chỉ số thời gian thực` (kWh) — chỉ số công tơ mới nhất
-- `Tổng tiêu thụ dồn kỳ này (theo ngày)` (kWh) — tổng cộng dồn từ đầu kỳ hóa đơn hiện tại tới nay, attribute `Chi tiết` chứa bảng đầy đủ từng ngày
 - `Tiêu thụ hôm nay` (kWh) — kèm attribute hôm qua, tháng này, tháng trước, ngưỡng cảnh báo
 - `Tháng hiện tại` *(entity riêng)* — state dạng "Tháng 7/2026"
 - `Tiêu thụ tháng hiện tại` (kWh) — tháng dương lịch đang chạy, chưa chốt kỳ nên **chưa có tiền điện** chính thức
