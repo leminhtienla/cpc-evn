@@ -58,6 +58,11 @@ class CPCBaseSensor(CoordinatorEntity, SensorEntity):
     """Base entity - chung device_info."""
 
     _attr_has_entity_name = True
+    # "Chi tiết" ở nhiều sensor chứa danh sách dài (hàng chục-hàng trăm bản
+    # ghi), dễ vượt giới hạn 16KB mà recorder cho phép lưu vào DB lịch sử.
+    # Loại các attribute này khỏi recorder - vẫn hiển thị bình thường trên
+    # sensor, chỉ là không lưu lịch sử thay đổi của riêng attribute đó.
+    _unrecorded_attributes = frozenset({"Chi tiết"})
 
     def __init__(self, coordinator: CPCDataUpdateCoordinator, customer_code: str):
         super().__init__(coordinator)
