@@ -35,6 +35,7 @@ class CPCApi:
         self.customer_code = customer_code
         self.token: Optional[str] = None
         self.org_code: Optional[str] = None  # vd "PP0700", lấy từ customer info
+        self.server_time_header: Optional[str] = None  # header "Date" thô từ response gần nhất
 
     def _headers(self, with_auth: bool = True) -> Dict[str, str]:
         headers = {
@@ -96,6 +97,12 @@ class CPCApi:
             if resp.status != 200:
                 text = await resp.text()
                 raise CPCApiError(f"GET {path} thất bại, HTTP {resp.status}: {text[:300]}")
+            # Header "Date" chuẩn HTTP - cho biết giờ hiện tại theo server
+            # EVN (GMT), dùng để đối chiếu khi tính "hôm nay/tháng này" có
+            # đúng ngày theo server hay không (tránh lệch múi giờ).
+            server_date = resp.headers.get("Date")
+            if server_date:
+                self.server_time_header = server_date
             return await resp.json()
 
     async def get_customer_info(self) -> Dict[str, Any]:
@@ -199,4 +206,5 @@ class CPCApi:
             "daily_view": daily_view,
             "consumption_summary": consumption_summary,
             "meter_changes": meter_changes,
+            "server_time_header": self.server_time_header,
         }

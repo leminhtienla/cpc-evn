@@ -40,6 +40,7 @@ Tất cả endpoint dưới đây được xác nhận bằng cách bắt reques
 ## Sensors
 
 - `Chỉ số thời gian thực` (kWh) — chỉ số công tơ mới nhất
+- `Giờ server EVN` — giờ hiện tại theo server (từ header HTTP `Date`), dùng đối chiếu khi nghi ngờ lệch múi giờ/lệch ngày
 - `Tiêu thụ theo ngày` (kWh) — API chính thức EVN, attribute `Chi tiết` chứa toàn bộ bảng ngày
 - `Tiêu thụ hôm nay` (kWh) — kèm attribute hôm qua, tháng này, tháng trước, ngưỡng cảnh báo
 - `Tiêu thụ tháng này` (kWh) — **tháng dương lịch đang chạy**, chưa chốt kỳ nên **chưa có tiền điện**

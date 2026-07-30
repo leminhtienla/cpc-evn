@@ -1,9 +1,10 @@
 """Sensors cho CPC."""
 
 import logging
+from email.utils import parsedate_to_datetime
 from typing import Optional
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
@@ -43,6 +44,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     entities = [
         CPCRealtimeSensor(coordinator, customer_code),
+        CPCServerTimeSensor(coordinator, customer_code),
         CPCDailyBreakdownSensor(coordinator, customer_code),
         CPCTodayYesterdaySensor(coordinator, customer_code),
         CPCCurrentMonthRunningSensor(coordinator, customer_code),
@@ -110,6 +112,39 @@ class CPCRealtimeSensor(CPCBaseSensor):
         }
 
 
+class CPCServerTimeSensor(CPCBaseSensor):
+    """Giờ hiện tại theo server EVN (cskh-api.cpc.vn), lấy từ header HTTP
+    "Date" chuẩn của mọi response. Dùng để đối chiếu khi cần kiểm tra
+    "hôm nay/tháng này" có bị lệch múi giờ hoặc lệch ngày so với server
+    tính toán hay không - ví dụ khi HA và server rơi vào 2 ngày khác nhau
+    lúc gần nửa đêm.
+    """
+
+    _sensor_key = "gio_server_evn"
+    _attr_name = "Giờ server EVN"
+    _attr_icon = "mdi:web-clock"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def native_value(self):
+        header = (self.coordinator.data or {}).get("server_time_header")
+        if not header:
+            return None
+        try:
+            return parsedate_to_datetime(header)
+        except (TypeError, ValueError):
+            return None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        header = (self.coordinator.data or {}).get("server_time_header")
+        return {
+            "Header gốc": header,
+            "Nguồn": "HTTP response header 'Date' từ cskh-api.cpc.vn",
+        }
+
+
 class CPCDailyBreakdownSensor(CPCBaseSensor):
     """Tiêu thụ theo TỪNG NGÀY - từ API chính thức sl-tieu-thu-view của EVN."""
 
@@ -172,7 +207,15 @@ class CPCTodayYesterdaySensor(CPCBaseSensor):
         ec = self._ec
         if not ec:
             return {}
+        ngay_hom_nay = None
+        server_header = (self.coordinator.data or {}).get("server_time_header")
+        if server_header:
+            try:
+                ngay_hom_nay = parsedate_to_datetime(server_header).date().isoformat()
+            except (TypeError, ValueError):
+                pass
         return {
+            "Ngày (hôm nay, theo server)": ngay_hom_nay,
             "Tiêu thụ hôm qua (kWh)": ec.get("electricConsumptionYesterday"),
             "Tiêu thụ tháng này (kWh)": ec.get("electricConsumptionThisMonth"),
             "Tiêu thụ tháng trước (kWh)": ec.get("electricConsumptionLastMonth"),
@@ -230,6 +273,19 @@ class CPCMonthlyCostSensor(CPCBaseSensor):
         latest = _latest_bill(bills)
         return latest.get("TONG_TIEN") if latest else None
 
+    @property
+    def extra_state_attributes(self) -> dict:
+        bills = (self.coordinator.data or {}).get("bill_history", [])
+        latest = _latest_bill(bills)
+        if not latest:
+            return {}
+        return {
+            "Tháng": latest.get("THANG"),
+            "Năm": latest.get("NAM"),
+            "Ngày đầu kỳ": latest.get("NGAY_DKY"),
+            "Ngày cuối kỳ": latest.get("NGAY_CKY"),
+        }
+
 
 class CPCCurrentMonthRunningSensor(CPCBaseSensor):
     """Tiêu thụ tháng dương lịch HIỆN TẠI, đang chạy - chưa chốt hóa đơn nên
@@ -257,7 +313,20 @@ class CPCCurrentMonthRunningSensor(CPCBaseSensor):
     def extra_state_attributes(self) -> dict:
         if not self._ec:
             return {}
+        # power-consumption-alerts KHÔNG trả kèm tháng/năm - suy ra từ giờ
+        # server EVN (chính xác hơn giờ local HA, tránh lệch múi giờ/lệch
+        # ngày lúc gần giao thời). Nếu chưa có giờ server thì bỏ trống.
+        thang, nam = None, None
+        server_header = (self.coordinator.data or {}).get("server_time_header")
+        if server_header:
+            try:
+                server_dt = parsedate_to_datetime(server_header)
+                thang, nam = server_dt.month, server_dt.year
+            except (TypeError, ValueError):
+                pass
         return {
+            "Tháng": thang,
+            "Năm": nam,
             "Nguồn": "cskh.cpc.vn (power-consumption-alerts)",
             "Lưu ý": "Tháng đang chạy, chưa chốt kỳ nên CHƯA CÓ tiền điện. Xem sensor 'Tiêu thụ kỳ hóa đơn gần nhất' để biết tiền điện của kỳ đã chốt gần nhất.",
         }
@@ -280,6 +349,17 @@ class CPCLastYearConsumptionSensor(CPCBaseSensor):
         same = _same_period_last_year(bills, latest.get("THANG"), latest.get("NAM"))
         return same.get("DIEN_TTHU") if same else None
 
+    @property
+    def extra_state_attributes(self) -> dict:
+        bills = (self.coordinator.data or {}).get("bill_history", [])
+        latest = _latest_bill(bills)
+        if not latest:
+            return {}
+        same = _same_period_last_year(bills, latest.get("THANG"), latest.get("NAM"))
+        if not same:
+            return {}
+        return {"Tháng": same.get("THANG"), "Năm": same.get("NAM")}
+
 
 class CPCLastYearCostSensor(CPCBaseSensor):
     """Tiền điện cùng tháng, năm trước (VNĐ)."""
@@ -297,6 +377,17 @@ class CPCLastYearCostSensor(CPCBaseSensor):
             return None
         same = _same_period_last_year(bills, latest.get("THANG"), latest.get("NAM"))
         return same.get("TONG_TIEN") if same else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        bills = (self.coordinator.data or {}).get("bill_history", [])
+        latest = _latest_bill(bills)
+        if not latest:
+            return {}
+        same = _same_period_last_year(bills, latest.get("THANG"), latest.get("NAM"))
+        if not same:
+            return {}
+        return {"Tháng": same.get("THANG"), "Năm": same.get("NAM")}
 
 
 class CPCBillHistorySensor(CPCBaseSensor):
