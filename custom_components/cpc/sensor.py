@@ -1,6 +1,7 @@
 """Sensors cho CPC."""
 
 import logging
+from datetime import date
 from email.utils import parsedate_to_datetime
 from typing import Optional
 
@@ -46,6 +47,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         CPCTodayYesterdaySensor(coordinator, customer_code),
         CPCCurrentPeriodSensor(coordinator, customer_code),
         CPCCurrentMonthRunningSensor(coordinator, customer_code),
+        CPCSpiderBreakdownSensor(coordinator, customer_code),
+        CPCSpiderCurrentPortionSensor(coordinator, customer_code),
         CPCBillEstimateSensor(coordinator, customer_code),
         CPCLatestBillPeriodSensor(coordinator, customer_code),
         CPCLastYearPeriodSensor(coordinator, customer_code),
@@ -77,7 +80,7 @@ class CPCBaseSensor(CoordinatorEntity, SensorEntity):
         info = (self.coordinator.data or {}).get("customer_info", {})
         return {
             "identifiers": {(DOMAIN, self._customer_code)},
-            "name": info.get("customerName") or f"CPC {self._customer_code}",
+            "name": self._customer_code,
             "manufacturer": "CPC - Điện lực Miền Trung",
             "model": info.get("meterId", "CPC Meter"),
         }
@@ -275,8 +278,16 @@ class CPCMonthlyCostSensor(CPCBaseSensor):
 
 
 class CPCCurrentPeriodSensor(CPCBaseSensor):
-    """Entity RIÊNG chỉ để biết tháng dương lịch hiện tại (đang chạy, chưa
-    chốt kỳ) là tháng nào, theo giờ server EVN.
+    """Entity RIÊNG cho biết kỳ hiện tại (đang mở, chưa chốt) tính TỪ
+    THÁNG NÀO.
+
+    QUAN TRỌNG: EVN chốt kỳ theo ngày ghi công tơ, KHÔNG theo lịch dương.
+    Nếu tháng dương lịch đã qua nhưng EVN chưa chạy job chốt kỳ, thì kỳ
+    "đang chạy" thực chất vẫn được cộng dồn TỪ THÁNG TRƯỚC, dù bây giờ đã
+    sang tháng mới. Ví dụ: hôm nay 01/08 nhưng EVN chưa chốt kỳ tháng 7,
+    nên kỳ đang mở vẫn là "Tháng 7/2026" - không phải "Tháng 8/2026". Vì
+    vậy sensor này lấy tháng/năm từ NGÀY BẮT ĐẦU kỳ đang mở (ngay sau
+    ngày chốt kỳ trước), KHÔNG lấy theo ngày hôm nay.
     """
 
     _sensor_key = "thang_hien_tai"
@@ -285,14 +296,21 @@ class CPCCurrentPeriodSensor(CPCBaseSensor):
 
     @property
     def native_value(self):
-        server_header = (self.coordinator.data or {}).get("server_time_header")
-        if not server_header:
+        period_start = (self.coordinator.data or {}).get("current_period_start")
+        if not period_start:
             return None
         try:
-            dt = parsedate_to_datetime(server_header)
+            dt = date.fromisoformat(period_start)
         except (TypeError, ValueError):
             return None
         return f"Tháng {dt.month}/{dt.year}"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {
+            "Ngày bắt đầu kỳ (ước tính)": (self.coordinator.data or {}).get("current_period_start"),
+            "Lưu ý": "Tháng này = tháng chứa NGÀY BẮT ĐẦU của kỳ đang mở, không phải tháng dương lịch hiện tại. Nếu EVN chưa chốt kỳ tháng trước, kỳ đang mở vẫn thuộc về tháng trước dù đã sang tháng mới.",
+        }
 
 
 class CPCCurrentMonthRunningSensor(CPCBaseSensor):
@@ -307,11 +325,11 @@ class CPCCurrentMonthRunningSensor(CPCBaseSensor):
     _attr_icon = "mdi:calendar-clock"
 
     @property
-    def _server_month_year(self):
-        server_header = (self.coordinator.data or {}).get("server_time_header")
-        if server_header:
+    def _period_month_year(self):
+        period_start = (self.coordinator.data or {}).get("current_period_start")
+        if period_start:
             try:
-                dt = parsedate_to_datetime(server_header)
+                dt = date.fromisoformat(period_start)
                 return dt.month, dt.year
             except (TypeError, ValueError):
                 pass
@@ -332,23 +350,109 @@ class CPCCurrentMonthRunningSensor(CPCBaseSensor):
     def extra_state_attributes(self) -> dict:
         if not self._ec:
             return {}
-        thang, nam = self._server_month_year
+        thang, nam = self._period_month_year
         return {
             "Tháng": thang,
             "Năm": nam,
             "Nguồn": "cskh.cpc.vn (power-consumption-alerts)",
-            "Lưu ý": "Tháng đang chạy, chưa chốt kỳ nên CHƯA CÓ tiền điện. Xem sensor 'Tiêu thụ tháng trước' để biết tiền điện của kỳ đã chốt gần nhất.",
+            "Lưu ý": "Tháng đang chạy, chưa chốt kỳ nên CHƯA CÓ tiền điện. Xem sensor 'Tiêu thụ tháng trước' để biết tiền điện của kỳ đã chốt gần nhất. 'Tháng' ở đây là tháng chứa NGÀY BẮT ĐẦU kỳ đang mở - nếu EVN chưa chốt kỳ trước, có thể vẫn là tháng trước dù đã sang tháng mới.",
+        }
+
+
+class CPCSpiderBreakdownSensor(CPCBaseSensor):
+    """Số liệu TẠM CHỐT của tháng hiện tại (từ breakdown spider/chitiet).
+
+    Đây gần như là số cuối cùng của kỳ hóa đơn hiện tại (ví dụ tháng 7) -
+    chỉ còn thiếu bước EVN CHÍNH THỨC chốt sổ để phát hành hóa đơn. Nếu
+    chưa qua tháng dương lịch mới, số này TRÙNG với 'Tiêu thụ tháng hiện
+    tại'. Khi đã qua tháng mới mà EVN chưa kịp chốt, 'Tiêu thụ tháng hiện
+    tại' sẽ CỘNG THÊM phần của 'Tiêu thụ tháng tiếp theo' vào - lúc đó sensor này
+    mới là số ĐÚNG đại diện cho tháng hiện tại, không bị lẫn tháng sau.
+    """
+
+    _sensor_key = "tieu_thu_tam_chot_thang_hien_tai"
+    _attr_name = "Tiêu thụ tạm chốt tháng hiện tại"
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_icon = "mdi:calendar-alert"
+
+    @property
+    def _rows(self) -> list:
+        return (self.coordinator.data or {}).get("spider_detail") or []
+
+    @property
+    def native_value(self):
+        for r in self._rows:
+            if r.get("KY_HDON") != "Kỳ hiện tại":
+                return r.get("SAN_LUONG")
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        rows = self._rows
+        if not rows:
+            return {}
+        chua_chot = next((r for r in rows if r.get("KY_HDON") != "Kỳ hiện tại"), None)
+        hien_tai = next((r for r in rows if r.get("KY_HDON") == "Kỳ hiện tại"), None)
+        return {
+            "Tên kỳ (EVN)": chua_chot.get("KY_HDON") if chua_chot else None,
+            "Ngày đầu kỳ": chua_chot.get("NGAY_DKY_FORMAT") if chua_chot else None,
+            "Ngày cuối kỳ (lần đọc gần nhất)": chua_chot.get("NGAY_CKY_FORMAT") if chua_chot else None,
+            "Chỉ số đầu kỳ": chua_chot.get("CHISO_CU") if chua_chot else None,
+            "Chỉ số cuối (lần đọc gần nhất)": chua_chot.get("CHISO_MOI") if chua_chot else None,
+            "Tiêu thụ tháng tiếp theo (kWh, entity riêng)": hien_tai.get("SAN_LUONG") if hien_tai else None,
+            "Nguồn": "cskh.cpc.vn (spider/chitiet)",
+            "Lưu ý": "Số gần như cuối cùng của tháng hiện tại, chỉ còn chờ EVN chốt sổ chính thức. Sensor 'Dự tính tiền điện tháng hiện tại' dùng đúng số này để tính, không dùng số gộp của 'Tiêu thụ tháng hiện tại'.",
+        }
+
+
+class CPCSpiderCurrentPortionSensor(CPCBaseSensor):
+    """Phần sản lượng đã bắt đầu tính cho THÁNG TIẾP THEO (từ breakdown
+    spider/chitiet), dù tháng hiện tại còn chưa được EVN chốt sổ. Ví dụ
+    tháng 7 chưa chốt nhưng EVN đã bắt đầu 1 bucket riêng từ 01/08 - đó
+    chính là sensor này. Sẽ tăng dần tới khi tháng 7 chính thức chốt sổ,
+    sau đó "tháng tiếp theo" sẽ trở thành "tháng hiện tại" mới.
+    """
+
+    _sensor_key = "tieu_thu_thang_tiep_theo"
+    _attr_name = "Tiêu thụ tháng tiếp theo"
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_icon = "mdi:calendar-arrow-right"
+
+    @property
+    def native_value(self):
+        rows = (self.coordinator.data or {}).get("spider_detail") or []
+        row = next((r for r in rows if r.get("KY_HDON") == "Kỳ hiện tại"), None)
+        return row.get("SAN_LUONG") if row else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        rows = (self.coordinator.data or {}).get("spider_detail") or []
+        row = next((r for r in rows if r.get("KY_HDON") == "Kỳ hiện tại"), None)
+        if not row:
+            return {}
+        return {
+            "Ngày đầu": row.get("NGAY_DKY_FORMAT"),
+            "Lần đọc gần nhất": row.get("NGAY_CKY_FORMAT"),
+            "Chỉ số đầu": row.get("CHISO_CU"),
+            "Chỉ số hiện tại": row.get("CHISO_MOI"),
+            "Nguồn": "cskh.cpc.vn (spider/chitiet)",
         }
 
 
 class CPCBillEstimateSensor(CPCBaseSensor):
-    """Dự tính tiền điện CẢ THÁNG hiện tại - ngoại suy từ kWh đã dùng tới
-    nay ra hết kỳ, rồi tính theo đúng biểu giá bậc thang sinh hoạt hiện
-    hành qua công cụ tính hoá đơn CHÍNH THỨC của EVN (calc.evn.com.vn).
+    """Dự tính tiền điện của kỳ hóa đơn đang mở, tính theo đúng biểu giá
+    bậc thang qua công cụ tính hoá đơn CHÍNH THỨC của EVN (calc.evn.com.vn).
 
-    Đây là ƯỚC TÍNH dựa trên giả định mức tiêu thụ trung bình mỗi ngày
-    không đổi tới hết kỳ - số thực tế có thể khác nếu thói quen dùng điện
-    thay đổi (ví dụ dùng điều hoà nhiều hơn vào cuối tháng nóng hơn).
+    Có 2 chế độ, tự chọn theo dữ liệu có sẵn:
+    1. Nếu EVN đã tách riêng được "kỳ chưa chốt" (spider/chitiet, đọc
+       bằng chỉ số ĐỊNH KỲ - LOAI_CHISO="DDK", giống chỉ số dùng để chốt
+       hóa đơn thật) -> dùng THẲNG số liệu đó, KHÔNG ngoại suy, vì số này
+       gần như đã là số CUỐI CÙNG, chỉ còn thiếu bước hành chính chốt kỳ.
+    2. Nếu chưa có (còn trong tháng dương lịch mà kỳ vừa bắt đầu, chưa
+       qua giao thời) -> ngoại suy từ mức dùng điện trung bình/ngày tới
+       hiện tại, giả định không đổi tới hết kỳ.
+
+    Xem attribute "Chế độ tính" để biết đang dùng cách nào.
     """
 
     _sensor_key = "du_tinh_tien_dien_thang_hien_tai"
@@ -371,17 +475,26 @@ class CPCBillEstimateSensor(CPCBaseSensor):
         est = self._est
         if not est:
             return {}
-        return {
-            "Đã dùng tới hiện tại (kWh)": est.get("kwh_da_dung"),
-            "Dự tính cả kỳ (kWh)": est.get("kwh_du_tinh_ca_ky"),
-            "Số ngày đã qua / tổng số ngày kỳ": f"{est.get('so_ngay_da_qua')}/{est.get('so_ngay_ky')}",
-            "Ngày đầu kỳ (ước tính)": est.get("ngay_dau_ky"),
-            "Ngày cuối kỳ (ước tính)": est.get("ngay_cuoi_ky_du_kien"),
+        che_do = est.get("che_do", "")
+        la_ngoai_suy = "ngoại suy" in che_do
+
+        attrs = {
+            "Chế độ tính": che_do,
+            "Tên kỳ (EVN)": est.get("ten_ky_evn"),
+            "Sản lượng dùng để tính (kWh)": est.get("kwh_du_tinh_ca_ky"),
+            "Ngày đầu kỳ": est.get("ngay_dau_ky"),
+            "Ngày cuối kỳ": est.get("ngay_cuoi_ky_du_kien"),
             "Tiền điện trước thuế (VNĐ)": est.get("tien_truoc_thue"),
             "Thuế GTGT (VNĐ)": est.get("tien_thue"),
             "Nguồn": "calc.evn.com.vn (công cụ tính hoá đơn chính thức của EVN)",
-            "Lưu ý": "Đây là ƯỚC TÍNH - giả định mức dùng điện trung bình/ngày không đổi tới hết kỳ. Ngày đầu/cuối kỳ cũng là ước tính dựa trên độ dài kỳ trước, có thể lệch vài ngày so với ngày EVN thực sự ghi công tơ.",
         }
+        if la_ngoai_suy:
+            attrs["Đã dùng tới hiện tại (kWh)"] = est.get("kwh_da_dung")
+            attrs["Số ngày đã qua / tổng số ngày kỳ"] = f"{est.get('so_ngay_da_qua')}/{est.get('so_ngay_ky')}"
+            attrs["Lưu ý"] = "Đây là ƯỚC TÍNH ngoại suy - giả định mức dùng điện trung bình/ngày không đổi tới hết kỳ. Ngày đầu/cuối kỳ cũng là ước tính, có thể lệch vài ngày so với ngày EVN thực sự ghi công tơ."
+        else:
+            attrs["Lưu ý"] = "Số liệu gần như CUỐI CÙNG (đọc bằng chỉ số định kỳ, giống loại dùng để chốt hóa đơn thật) - không phải ngoại suy. Ngày đầu/cuối kỳ lấy trực tiếp từ EVN, không phải tự đoán."
+        return attrs
 
 
 class CPCLastYearConsumptionSensor(CPCBaseSensor):

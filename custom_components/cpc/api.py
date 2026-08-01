@@ -137,7 +137,28 @@ class CPCApi:
         )
         return data if isinstance(data, list) else []
 
-    async def get_consumption_summary(self) -> Optional[Dict[str, Any]]:
+    async def get_spider_detail(self) -> List[Dict[str, Any]]:
+        """Chi tiết breakdown sản lượng theo TỪNG KỲ con (spider/chitiet).
+
+        Khi EVN CHƯA chốt kỳ trước, endpoint này trả về 2 (hoặc nhiều)
+        phần tử tách biệt thay vì gộp chung 1 số như
+        power-consumption-alerts, ví dụ:
+        - "Kỳ 1 - 7/2026": SAN_LUONG=120 (từ 01/07 tới lúc EVN đọc chỉ số
+          định kỳ cuối cùng, LOAI_CHISO="DDK")
+        - "Kỳ hiện tại": SAN_LUONG=16.37 (từ đầu tháng dương lịch hiện tại
+          tới giờ, đọc bằng spider, LOAI_CHISO="")
+        Tổng 2 số này = đúng bằng electricConsumptionThisMonth của
+        power-consumption-alerts (120 + 16.37 ≈ 136.35).
+        """
+        if not self.org_code:
+            await self.get_customer_info()
+        data = await self._get(
+            f"/api/remote/customers/{self.customer_code}/spider/chitiet",
+            params={"maDonViQuanLy": self.org_code},
+        )
+        return data if isinstance(data, list) else []
+
+
         """Tóm tắt tiêu thụ hôm nay/hôm qua/tháng này/tháng trước + ngưỡng
         cảnh báo, đã được EVN tính sẵn (power-consumption-alerts).
 
@@ -302,32 +323,80 @@ class CPCApi:
         index_log = await self.get_index_log()
         bill_history = await self.get_bill_history()
         consumption_summary = await self.get_consumption_summary()
+        spider_detail = await self.get_spider_detail()
+
+        # spider_detail có thể có 1 dòng đặt tên cụ thể kiểu "Kỳ 1 - 7/2026"
+        # (LOAI_CHISO="DDK" - chỉ số ĐỊNH KỲ, giống hệt loại dùng để chốt
+        # hóa đơn thật) - đây là KỲ THẬT chưa chốt, SAN_LUONG của nó gần
+        # như là số CUỐI CÙNG (chỉ còn thiếu bước hành chính "chốt kỳ" của
+        # EVN), và NGAY_DKY/NGAY_CKY là ngày kỳ THẬT do EVN cung cấp -
+        # đáng tin cậy hơn hẳn so với tự đoán độ dài kỳ từ kỳ trước.
+        ky_chua_chot = next((r for r in spider_detail if r.get("KY_HDON") != "Kỳ hiện tại"), None) if spider_detail else None
 
         bill_estimate = None
-        period_start, period_end, today_ref = self._current_period_bounds(bill_history)
-        kwh_so_far = None
-        if consumption_summary:
-            kwh_so_far = (consumption_summary.get("electricConsumption") or {}).get("electricConsumptionThisMonth")
+        if ky_chua_chot and ky_chua_chot.get("NGAY_DKY") and ky_chua_chot.get("NGAY_CKY"):
+            # CÓ kỳ thật chưa chốt -> dùng thẳng số liệu này, KHÔNG ngoại
+            # suy (vì SAN_LUONG của kỳ "DDK" gần như đã là số cuối cùng).
+            try:
+                period_start = date.fromisoformat(ky_chua_chot["NGAY_DKY"][:10])
+                period_end = date.fromisoformat(ky_chua_chot["NGAY_CKY"][:10])
+            except (ValueError, TypeError):
+                period_start, period_end, _ = self._current_period_bounds(bill_history)
+            kwh_final = ky_chua_chot.get("SAN_LUONG")
+            if kwh_final is not None and kwh_final > 0:
+                bill_result = await self.estimate_bill(kwh_final, period_start, period_end)
+                if bill_result:
+                    bill_estimate = {
+                        "che_do": "kỳ chưa chốt (số liệu gần như cuối cùng, không ngoại suy)",
+                        "ten_ky_evn": ky_chua_chot.get("KY_HDON"),
+                        "kwh_du_tinh_ca_ky": kwh_final,
+                        "ngay_dau_ky": period_start.isoformat(),
+                        "ngay_cuoi_ky_du_kien": period_end.isoformat(),
+                        "tien_truoc_thue": bill_result.get("SO_TIEN"),
+                        "tien_thue": bill_result.get("TIEN_GTGT"),
+                        "tong_tien_du_tinh": bill_result.get("TONG_TIEN"),
+                    }
+        else:
+            # KHÔNG có kỳ thật tách riêng (còn trong tháng dương lịch mà kỳ
+            # bắt đầu, chưa qua giao thời) -> fallback: ngoại suy từ tổng
+            # tiêu thụ tháng hiện tại (mục 4), vì lúc này nó CHÍNH LÀ kỳ
+            # đang mở, không bị lẫn với kỳ khác.
+            period_start, period_end, today_ref = self._current_period_bounds(bill_history)
+            kwh_so_far = None
+            if consumption_summary:
+                kwh_so_far = (consumption_summary.get("electricConsumption") or {}).get("electricConsumptionThisMonth")
 
-        if kwh_so_far is not None and kwh_so_far > 0:
-            so_ngay_ky = (period_end - period_start).days + 1
-            so_ngay_da_qua = max((today_ref - period_start).days + 1, 1)
-            so_ngay_da_qua = min(so_ngay_da_qua, so_ngay_ky)
-            kwh_du_tinh_ca_ky = kwh_so_far / so_ngay_da_qua * so_ngay_ky
+            if kwh_so_far is not None and kwh_so_far > 0:
+                so_ngay_ky = (period_end - period_start).days + 1
+                so_ngay_da_qua = max((today_ref - period_start).days + 1, 1)
+                so_ngay_da_qua = min(so_ngay_da_qua, so_ngay_ky)
+                kwh_du_tinh_ca_ky = kwh_so_far / so_ngay_da_qua * so_ngay_ky
 
-            bill_result = await self.estimate_bill(kwh_du_tinh_ca_ky, period_start, period_end)
-            if bill_result:
-                bill_estimate = {
-                    "kwh_da_dung": kwh_so_far,
-                    "kwh_du_tinh_ca_ky": round(kwh_du_tinh_ca_ky, 2),
-                    "so_ngay_da_qua": so_ngay_da_qua,
-                    "so_ngay_ky": so_ngay_ky,
-                    "ngay_dau_ky": period_start.isoformat(),
-                    "ngay_cuoi_ky_du_kien": period_end.isoformat(),
-                    "tien_truoc_thue": bill_result.get("SO_TIEN"),
-                    "tien_thue": bill_result.get("TIEN_GTGT"),
-                    "tong_tien_du_tinh": bill_result.get("TONG_TIEN"),
-                }
+                bill_result = await self.estimate_bill(kwh_du_tinh_ca_ky, period_start, period_end)
+                if bill_result:
+                    bill_estimate = {
+                        "che_do": "ngoại suy (chưa qua giao thời tháng, chưa có kỳ tách riêng từ EVN)",
+                        "kwh_da_dung": kwh_so_far,
+                        "kwh_du_tinh_ca_ky": round(kwh_du_tinh_ca_ky, 2),
+                        "so_ngay_da_qua": so_ngay_da_qua,
+                        "so_ngay_ky": so_ngay_ky,
+                        "ngay_dau_ky": period_start.isoformat(),
+                        "ngay_cuoi_ky_du_kien": period_end.isoformat(),
+                        "tien_truoc_thue": bill_result.get("SO_TIEN"),
+                        "tien_thue": bill_result.get("TIEN_GTGT"),
+                        "tong_tien_du_tinh": bill_result.get("TONG_TIEN"),
+                    }
+
+        # current_period_start dùng cho các sensor khác (Tháng hiện tại...)
+        # - ưu tiên ngày thật từ EVN nếu có kỳ chưa chốt tách riêng.
+        if ky_chua_chot and ky_chua_chot.get("NGAY_DKY"):
+            try:
+                cp_start = date.fromisoformat(ky_chua_chot["NGAY_DKY"][:10])
+                cp_end = date.fromisoformat(ky_chua_chot["NGAY_CKY"][:10])
+            except (ValueError, TypeError):
+                cp_start, cp_end, _ = self._current_period_bounds(bill_history)
+        else:
+            cp_start, cp_end, _ = self._current_period_bounds(bill_history)
 
         return {
             "customer_info": customer_info,
@@ -336,4 +405,7 @@ class CPCApi:
             "consumption_summary": consumption_summary,
             "server_time_header": self.server_time_header,
             "bill_estimate": bill_estimate,
+            "current_period_start": cp_start.isoformat(),
+            "current_period_end_estimate": cp_end.isoformat(),
+            "spider_detail": spider_detail,
         }

@@ -59,15 +59,8 @@ class CPCConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     _LOGGER.debug("API error: %s", err)
                     errors["base"] = "cannot_connect"
                 else:
-                    customer_name = None
-                    try:
-                        info = await api.get_customer_info()
-                        customer_name = info.get("customerName")
-                    except Exception:  # noqa: BLE001 - không chặn tạo entry vì lỗi phụ này
-                        pass
-
                     return self.async_create_entry(
-                        title=customer_name or customer_code,
+                        title=customer_code,
                         data={
                             CONF_USERNAME: user_input[CONF_USERNAME],
                             CONF_PASSWORD: user_input[CONF_PASSWORD],
