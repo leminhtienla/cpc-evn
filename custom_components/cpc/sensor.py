@@ -384,7 +384,7 @@ class CPCSpiderBreakdownSensor(CPCBaseSensor):
         for r in self._rows:
             if r.get("KY_HDON") != "Kỳ hiện tại":
                 return r.get("SAN_LUONG")
-        return None
+        return 0
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -422,7 +422,7 @@ class CPCSpiderCurrentPortionSensor(CPCBaseSensor):
     def native_value(self):
         rows = (self.coordinator.data or {}).get("spider_detail") or []
         row = next((r for r in rows if r.get("KY_HDON") == "Kỳ hiện tại"), None)
-        return row.get("SAN_LUONG") if row else None
+        return row.get("SAN_LUONG") if row else 0
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -443,16 +443,12 @@ class CPCBillEstimateSensor(CPCBaseSensor):
     """Dự tính tiền điện của kỳ hóa đơn đang mở, tính theo đúng biểu giá
     bậc thang qua công cụ tính hoá đơn CHÍNH THỨC của EVN (calc.evn.com.vn).
 
-    Có 2 chế độ, tự chọn theo dữ liệu có sẵn:
-    1. Nếu EVN đã tách riêng được "kỳ chưa chốt" (spider/chitiet, đọc
-       bằng chỉ số ĐỊNH KỲ - LOAI_CHISO="DDK", giống chỉ số dùng để chốt
-       hóa đơn thật) -> dùng THẲNG số liệu đó, KHÔNG ngoại suy, vì số này
-       gần như đã là số CUỐI CÙNG, chỉ còn thiếu bước hành chính chốt kỳ.
-    2. Nếu chưa có (còn trong tháng dương lịch mà kỳ vừa bắt đầu, chưa
-       qua giao thời) -> ngoại suy từ mức dùng điện trung bình/ngày tới
-       hiện tại, giả định không đổi tới hết kỳ.
-
-    Xem attribute "Chế độ tính" để biết đang dùng cách nào.
+    Luôn ngoại suy tuyến tính theo số ngày dữ liệu THỰC đã capture được
+    (xác định bằng lần đọc chỉ số mới nhất thật, KHÔNG đoán theo ngày
+    hôm nay) - đúng cả khi mới giữa kỳ, không chỉ đúng lúc gần cuối kỳ.
+    Ưu tiên lấy period_start/end và sản lượng từ "kỳ chưa chốt" thật của
+    EVN (spider/chitiet) nếu có, fallback về power-consumption-alerts +
+    tự đoán độ dài kỳ nếu chưa có.
     """
 
     _sensor_key = "du_tinh_tien_dien_thang_hien_tai"
@@ -475,26 +471,18 @@ class CPCBillEstimateSensor(CPCBaseSensor):
         est = self._est
         if not est:
             return {}
-        che_do = est.get("che_do", "")
-        la_ngoai_suy = "ngoại suy" in che_do
-
-        attrs = {
-            "Chế độ tính": che_do,
-            "Tên kỳ (EVN)": est.get("ten_ky_evn"),
-            "Sản lượng dùng để tính (kWh)": est.get("kwh_du_tinh_ca_ky"),
+        return {
+            "Chế độ tính": est.get("che_do"),
+            "Đã dùng tới hiện tại (kWh)": est.get("kwh_da_dung"),
+            "Sản lượng dùng để tính - dự tính cả kỳ (kWh)": est.get("kwh_du_tinh_ca_ky"),
+            "Số ngày đã capture / tổng số ngày kỳ": f"{est.get('so_ngay_da_qua')}/{est.get('so_ngay_ky')}",
             "Ngày đầu kỳ": est.get("ngay_dau_ky"),
             "Ngày cuối kỳ": est.get("ngay_cuoi_ky_du_kien"),
             "Tiền điện trước thuế (VNĐ)": est.get("tien_truoc_thue"),
             "Thuế GTGT (VNĐ)": est.get("tien_thue"),
             "Nguồn": "calc.evn.com.vn (công cụ tính hoá đơn chính thức của EVN)",
+            "Lưu ý": "Đây là ƯỚC TÍNH ngoại suy tuyến tính - giả định mức dùng điện trung bình/ngày (tính tới lần đọc chỉ số mới nhất thật) không đổi tới hết kỳ. Có thể lệch nếu thói quen dùng điện thay đổi (vd dùng điều hoà nhiều hơn cuối tháng nóng hơn).",
         }
-        if la_ngoai_suy:
-            attrs["Đã dùng tới hiện tại (kWh)"] = est.get("kwh_da_dung")
-            attrs["Số ngày đã qua / tổng số ngày kỳ"] = f"{est.get('so_ngay_da_qua')}/{est.get('so_ngay_ky')}"
-            attrs["Lưu ý"] = "Đây là ƯỚC TÍNH ngoại suy - giả định mức dùng điện trung bình/ngày không đổi tới hết kỳ. Ngày đầu/cuối kỳ cũng là ước tính, có thể lệch vài ngày so với ngày EVN thực sự ghi công tơ."
-        else:
-            attrs["Lưu ý"] = "Số liệu gần như CUỐI CÙNG (đọc bằng chỉ số định kỳ, giống loại dùng để chốt hóa đơn thật) - không phải ngoại suy. Ngày đầu/cuối kỳ lấy trực tiếp từ EVN, không phải tự đoán."
-        return attrs
 
 
 class CPCLastYearConsumptionSensor(CPCBaseSensor):

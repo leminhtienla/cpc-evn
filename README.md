@@ -46,7 +46,7 @@ Tất cả endpoint dưới đây được xác nhận bằng cách bắt reques
 - `Tiêu thụ tháng hiện tại` (kWh) — kỳ đang chạy, chưa chốt kỳ nên **chưa có tiền điện** chính thức
 - `Tiêu thụ tạm chốt tháng hiện tại` (kWh) — số gần cuối cùng của tháng hiện tại, chỉ thiếu bước chốt sổ chính thức; TRÙNG với "Tiêu thụ tháng hiện tại" nếu chưa qua tháng dương lịch mới
 - `Tiêu thụ tháng tiếp theo` (kWh) — phần EVN đã bắt đầu tính riêng cho tháng kế tiếp dù tháng hiện tại chưa chốt; khi qua giao thời: "Tiêu thụ tháng hiện tại" = "Tiêu thụ tạm chốt tháng hiện tại" + "Tiêu thụ tháng tiếp theo"
-- `Dự tính tiền điện tháng hiện tại` (VNĐ) — tính cho ĐÚNG kỳ hóa đơn đang mở (không gộp nhầm với kỳ mới bắt đầu sau khi sang tháng). Ưu tiên dùng số liệu THẬT từ EVN (`spider/chitiet`, gần như số cuối cùng) khi có, chỉ ngoại suy khi chưa có kỳ tách riêng — xem attribute "Chế độ tính"
+- `Dự tính tiền điện tháng hiện tại` (VNĐ) — tính cho ĐÚNG kỳ hóa đơn đang mở (không gộp nhầm với kỳ mới bắt đầu sau khi sang tháng). Luôn ngoại suy theo số ngày dữ liệu THỰC đã có (dùng lần đọc chỉ số mới nhất thật từ `spider/thongTinChiSo`, không đoán theo lịch) - đúng cả khi mới giữa kỳ chứ không chỉ lúc gần cuối kỳ. Xem attribute "Chế độ tính" để biết nguồn kWh và số ngày đã capture
 - `Tháng trước` *(entity riêng)* — state dạng "Tháng 6/2026" (thực chất là kỳ hóa đơn **ĐÃ CHỐT** gần nhất - có thể không đúng nghĩa đen "tháng dương lịch trước" nếu ngày chốt sổ lệch)
 - `Tiêu thụ tháng trước` (kWh)
 - `Tiền điện tháng trước` (VNĐ)
