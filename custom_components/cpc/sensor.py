@@ -370,8 +370,8 @@ class CPCSpiderBreakdownSensor(CPCBaseSensor):
     mới là số ĐÚNG đại diện cho tháng hiện tại, không bị lẫn tháng sau.
     """
 
-    _sensor_key = "tieu_thu_thang_hien_tai_tam_chot"
-    _attr_name = "Tiêu thụ tháng hiện tại tạm chốt"
+    _sensor_key = "tieu_thu_thang_tam_chot"
+    _attr_name = "Tiêu thụ tháng tạm chốt"
     _attr_native_unit_of_measurement = "kWh"
     _attr_icon = "mdi:calendar-alert"
 
