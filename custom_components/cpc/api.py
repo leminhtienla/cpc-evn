@@ -159,6 +159,7 @@ class CPCApi:
         return data if isinstance(data, list) else []
 
 
+    async def get_consumption_summary(self) -> Optional[Dict[str, Any]]:
         """Tóm tắt tiêu thụ hôm nay/hôm qua/tháng này/tháng trước + ngưỡng
         cảnh báo, đã được EVN tính sẵn (power-consumption-alerts).
 
