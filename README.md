@@ -44,9 +44,9 @@ Tất cả endpoint dưới đây được xác nhận bằng cách bắt reques
 - `Tiêu thụ hôm nay` (kWh) — kèm attribute hôm qua, tháng này, tháng trước, ngưỡng cảnh báo
 - `Tháng hiện tại` *(entity riêng)* — tháng chứa NGÀY BẮT ĐẦU của kỳ đang mở (không phải tháng dương lịch hôm nay - xem lưu ý bên dưới)
 - `Tiêu thụ tháng hiện tại` (kWh) — kỳ đang chạy, chưa chốt kỳ nên **chưa có tiền điện** chính thức
-- `Tiêu thụ tháng tạm chốt` (kWh) — số gần cuối cùng của tháng hiện tại, chỉ thiếu bước chốt sổ chính thức; TRÙNG với "Tiêu thụ tháng hiện tại" nếu chưa qua tháng dương lịch mới
+- `Tiêu thụ tháng tạm chốt` (kWh) — CHỈ có giá trị khi EVN đã có số đọc ĐỊNH KỲ thật (LOAI_CHISO=DDK, cùng loại dùng để chốt hóa đơn) cho tháng hiện tại; nếu chưa có (chỉ có số đọc spider thô, real-time) thì = 0, không tự "tạm chốt thay EVN"
 - `Tiêu thụ tháng tiếp theo` (kWh) — phần EVN đã bắt đầu tính riêng cho tháng kế tiếp dù tháng hiện tại chưa chốt; khi qua giao thời: "Tiêu thụ tháng hiện tại" = "Tiêu thụ tháng tạm chốt" + "Tiêu thụ tháng tiếp theo"
-- `Dự tính tiền điện tháng hiện tại` (VNĐ) — tiền điện tính trên số kWh **ĐÃ DÙNG TỚI HIỆN TẠI** (không ngoại suy/dự đoán cho cả tháng), theo đúng biểu giá bậc thang qua công cụ tính hoá đơn EVN. Hiểu đơn giản: "nếu EVN chốt sổ ngay bây giờ thì tiền điện là bao nhiêu" - số này tăng dần theo từng chu kỳ cập nhật khi dùng thêm điện
+- `Dự tính tiền điện tháng hiện tại` (VNĐ) — tiền điện tính trên số kWh **ĐÃ DÙNG TỚI HIỆN TẠI** (không ngoại suy/dự đoán cho cả tháng), theo đúng biểu giá bậc thang qua công cụ tính hoá đơn EVN. Ưu tiên dùng số "tạm chốt" thật (LOAI_CHISO=DDK) nếu có, tự fallback qua "Tiêu thụ tháng hiện tại" nếu chưa có DDK. Hiểu đơn giản: "nếu EVN chốt sổ ngay bây giờ thì tiền điện là bao nhiêu" - số này tăng dần theo từng chu kỳ cập nhật khi dùng thêm điện
 - `Tháng trước` *(entity riêng)* — state dạng "Tháng 6/2026" (thực chất là kỳ hóa đơn **ĐÃ CHỐT** gần nhất - có thể không đúng nghĩa đen "tháng dương lịch trước" nếu ngày chốt sổ lệch)
 - `Tiêu thụ tháng trước` (kWh)
 - `Tiền điện tháng trước` (VNĐ)

@@ -360,20 +360,19 @@ class CPCCurrentMonthRunningSensor(CPCBaseSensor):
 
 
 class CPCSpiderBreakdownSensor(CPCBaseSensor):
-    """Số liệu TẠM CHỐT của tháng hiện tại (từ breakdown spider/chitiet).
+    """Số liệu TẠM CHỐT THẬT của EVN cho tháng hiện tại (từ breakdown
+    spider/chitiet), CHỈ tính khi đúng LOAI_CHISO="DDK" (chỉ số ĐỊNH KỲ -
+    cùng loại EVN dùng để chốt hóa đơn thật). KHÔNG tự ý coi số đọc
+    spider thô (LOAI_CHISO="") là "tạm chốt" thay EVN - nếu chưa có
+    DDK thật, sensor này = 0 (không giả định/không tạm chốt hộ EVN).
 
-    Đây gần như là số cuối cùng của kỳ hóa đơn hiện tại (ví dụ tháng 7) -
-    chỉ còn thiếu bước EVN CHÍNH THỨC chốt sổ để phát hành hóa đơn. Nếu
-    chưa qua tháng dương lịch mới, số này TRÙNG với 'Tiêu thụ tháng hiện
-    tại'. Khi đã qua tháng mới mà EVN chưa kịp chốt, 'Tiêu thụ tháng hiện
-    tại' sẽ CỘNG THÊM phần của 'Tiêu thụ tháng tiếp theo' vào - lúc đó sensor này
-    mới là số ĐÚNG đại diện cho tháng hiện tại, không bị lẫn tháng sau.
+    Khi có DDK thật: đây gần như là số cuối cùng của kỳ hóa đơn hiện tại,
+    chỉ còn thiếu bước EVN chính thức chốt sổ để phát hành hóa đơn.
 
     QUAN TRỌNG: xác định dòng nào là "tháng hiện tại" bằng cách SO NGÀY
     THẬT (NGAY_DKY của từng dòng) với entity 'Tháng hiện tại', KHÔNG so
     theo tên "KY_HDON" mà EVN đặt - vì tên "Kỳ hiện tại" của EVN đổi ý
-    nghĩa tùy theo EVN đã chốt kỳ trước hay chưa (trước khi chốt: "Kỳ
-    hiện tại" = tháng SAU; sau khi chốt: "Kỳ hiện tại" = chính tháng này).
+    nghĩa tùy theo EVN đã chốt kỳ trước hay chưa.
     """
 
     _sensor_key = "tieu_thu_thang_tam_chot"
@@ -407,22 +406,25 @@ class CPCSpiderBreakdownSensor(CPCBaseSensor):
             return None
 
     @property
-    def _row_thang_hien_tai(self):
+    def _row_tam_chot(self):
         ym = self._thang_hien_tai_ym
         if ym is None:
             return None
-        return next((r for r in self._rows if self._row_ym(r) == ym), None)
+        return next(
+            (r for r in self._rows if self._row_ym(r) == ym and r.get("LOAI_CHISO") == "DDK"),
+            None,
+        )
 
     @property
     def native_value(self):
-        row = self._row_thang_hien_tai
+        row = self._row_tam_chot
         return row.get("SAN_LUONG") if row else 0
 
     @property
     def extra_state_attributes(self) -> dict:
-        row = self._row_thang_hien_tai
+        row = self._row_tam_chot
         if not row:
-            return {}
+            return {"Lưu ý": "Chưa có số tạm chốt THẬT từ EVN (LOAI_CHISO=DDK) cho tháng hiện tại - sensor 'Dự tính tiền điện' đang tự fallback dùng 'Tiêu thụ tháng hiện tại' thay thế."}
         return {
             "Tên kỳ (EVN)": row.get("KY_HDON"),
             "Ngày đầu kỳ": row.get("NGAY_DKY_FORMAT"),

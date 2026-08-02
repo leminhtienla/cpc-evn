@@ -344,15 +344,25 @@ class CPCApi:
             except ValueError:
                 return None
 
-        # Dòng thuộc ĐÚNG tháng hiện tại (so theo ngày thật, không theo tên).
+        # Dòng thuộc ĐÚNG tháng hiện tại (so theo ngày thật, không theo tên)
+        # - dùng để xác định "Tháng hiện tại" (mục 3) là tháng nào.
         row_thang_hien_tai = next((r for r in spider_detail if _row_ym(r) == thang_hien_tai_ym), None)
+
+        # Dòng "TẠM CHỐT" THẬT của EVN - PHẢI đúng LOAI_CHISO="DDK" (chỉ
+        # số ĐỊNH KỲ, cùng loại EVN dùng để chốt hóa đơn thật). Dòng
+        # LOAI_CHISO="" chỉ là số đọc spider thô (real-time), CHƯA phải
+        # số EVN tạm chốt - không tự ý coi đó là "tạm chốt" thay EVN.
+        row_tam_chot = next(
+            (r for r in spider_detail if _row_ym(r) == thang_hien_tai_ym and r.get("LOAI_CHISO") == "DDK"),
+            None,
+        )
 
         kwh_so_far = None
         nguon_kwh = None
 
-        if row_thang_hien_tai:
-            kwh_so_far = row_thang_hien_tai.get("SAN_LUONG")
-            nguon_kwh = f"spider/chitiet ({row_thang_hien_tai.get('KY_HDON')})"
+        if row_tam_chot:
+            kwh_so_far = row_tam_chot.get("SAN_LUONG")
+            nguon_kwh = f"spider/chitiet - tạm chốt EVN ({row_tam_chot.get('KY_HDON')})"
 
         if kwh_so_far is None and consumption_summary:
             kwh_so_far = (consumption_summary.get("electricConsumption") or {}).get("electricConsumptionThisMonth")
