@@ -301,21 +301,21 @@ class CPCApi:
 
         if latest and latest.get("NGAY_CKY"):
             try:
-                ngay_dky_truoc = date.fromisoformat(latest["NGAY_DKY"][:10])
                 ngay_cky_truoc = date.fromisoformat(latest["NGAY_CKY"][:10])
-                do_dai_ky = (ngay_cky_truoc - ngay_dky_truoc).days + 1
                 start = ngay_cky_truoc + timedelta(days=1)
-                end = start + timedelta(days=do_dai_ky - 1)
-                return start, end, today
             except (ValueError, TypeError, KeyError):
-                pass
-
-        # Fallback: tháng dương lịch hiện tại
-        start = today.replace(day=1)
-        if today.month == 12:
-            end = date(today.year, 12, 31)
+                start = today.replace(day=1)
         else:
-            end = date(today.year, today.month + 1, 1) - timedelta(days=1)
+            start = today.replace(day=1)
+
+        # period_end LUÔN là ngày cuối cùng của THÁNG DƯƠNG LỊCH chứa
+        # period_start - dùng số ngày THẬT của tháng đó (28/29/30/31),
+        # KHÔNG đoán/copy độ dài kỳ trước (đơn giản hơn, và chính xác hơn
+        # vì độ dài kỳ trước có thể khác tháng hiện tại, ví dụ 30 vs 31).
+        if start.month == 12:
+            end = date(start.year, 12, 31)
+        else:
+            end = date(start.year, start.month + 1, 1) - timedelta(days=1)
         return start, end, today
 
     async def async_fetch_all(self) -> Dict[str, Any]:
@@ -326,77 +326,49 @@ class CPCApi:
         consumption_summary = await self.get_consumption_summary()
         spider_detail = await self.get_spider_detail()
 
-        # spider_detail có thể có 1 dòng đặt tên cụ thể kiểu "Kỳ 1 - 7/2026"
-        # (LOAI_CHISO="DDK" - chỉ số ĐỊNH KỲ, giống hệt loại dùng để chốt
-        # hóa đơn thật) - đây là KỲ THẬT chưa chốt, SAN_LUONG của nó gần
-        # như là số CUỐI CÙNG (chỉ còn thiếu bước hành chính "chốt kỳ" của
-        # EVN), và NGAY_DKY/NGAY_CKY là ngày kỳ THẬT do EVN cung cấp -
-        # đáng tin cậy hơn hẳn so với tự đoán độ dài kỳ từ kỳ trước.
-        ky_chua_chot = next((r for r in spider_detail if r.get("KY_HDON") != "Kỳ hiện tại"), None) if spider_detail else None
+        # Xác định THÁNG/NĂM hiện tại một cách ĐỘC LẬP, dựa vào hóa đơn ĐÃ
+        # CHỐT gần nhất - KHÔNG dựa vào tên "Kỳ hiện tại" của EVN trong
+        # spider_detail, vì ý nghĩa tên đó THAY ĐỔI tùy EVN đã chốt kỳ
+        # trước hay chưa (trước khi chốt: "Kỳ hiện tại" = tháng SAU; sau
+        # khi chốt: "Kỳ hiện tại" = chính tháng hiện tại).
+        period_start, period_end, _ = self._current_period_bounds(bill_history)
+        thang_hien_tai_ym = (period_start.year, period_start.month)
 
-        # Ưu tiên lấy period_start/end THẬT từ EVN (kỳ chưa chốt tách
-        # riêng) nếu có - đáng tin hơn tự đoán từ độ dài kỳ trước.
-        period_start, period_end = None, None
+        def _row_ym(row):
+            ngay_dky = row.get("NGAY_DKY")
+            if not ngay_dky:
+                return None
+            try:
+                d = date.fromisoformat(ngay_dky[:10])
+                return (d.year, d.month)
+            except ValueError:
+                return None
+
+        # Dòng thuộc ĐÚNG tháng hiện tại (so theo ngày thật, không theo tên).
+        row_thang_hien_tai = next((r for r in spider_detail if _row_ym(r) == thang_hien_tai_ym), None)
+
         kwh_so_far = None
         nguon_kwh = None
 
-        if ky_chua_chot and ky_chua_chot.get("NGAY_DKY") and ky_chua_chot.get("NGAY_CKY"):
-            try:
-                period_start = date.fromisoformat(ky_chua_chot["NGAY_DKY"][:10])
-                period_end = date.fromisoformat(ky_chua_chot["NGAY_CKY"][:10])
-                kwh_so_far = ky_chua_chot.get("SAN_LUONG")
-                nguon_kwh = f"kỳ chưa chốt EVN ({ky_chua_chot.get('KY_HDON')})"
-            except (ValueError, TypeError):
-                pass
-
-        if period_start is None:
-            period_start, period_end, _ = self._current_period_bounds(bill_history)
+        if row_thang_hien_tai:
+            kwh_so_far = row_thang_hien_tai.get("SAN_LUONG")
+            nguon_kwh = f"spider/chitiet ({row_thang_hien_tai.get('KY_HDON')})"
 
         if kwh_so_far is None and consumption_summary:
             kwh_so_far = (consumption_summary.get("electricConsumption") or {}).get("electricConsumptionThisMonth")
             nguon_kwh = nguon_kwh or "power-consumption-alerts (tổng tháng hiện tại)"
 
+        # KHÔNG ngoại suy/dự đoán cả tháng - chỉ tính tiền cho ĐÚNG số kWh
+        # đã tiêu thụ tới hiện tại, áp theo biểu giá bậc thang của tháng
+        # (period_start/period_end dùng để biểu giá tính đúng số ngày
+        # trong tháng, không phải để nhân kWh lên).
         bill_estimate = None
         if kwh_so_far is not None and kwh_so_far > 0 and period_start and period_end:
-            so_ngay_ky = (period_end - period_start).days + 1
-
-            # QUAN TRỌNG: không giả định kwh_so_far đã "đủ cả kỳ" - luôn
-            # ngoại suy theo số ngày dữ liệu THỰC đã có, xác định bằng
-            # lần đọc chỉ số MỚI NHẤT thật (index_log), KHÔNG dùng ngày
-            # hôm nay theo lịch (vì dữ liệu luôn có độ trễ vài giờ-vài
-            # ngày so với thời điểm hỏi API).
-            latest_reading_date = None
-            for r in index_log:
-                ngaygio = r.get("NGAYGIO")
-                if not ngaygio:
-                    continue
-                try:
-                    d = date.fromisoformat(ngaygio[:10])
-                except ValueError:
-                    continue
-                if period_start <= d <= period_end:
-                    if latest_reading_date is None or d > latest_reading_date:
-                        latest_reading_date = d
-
-            if latest_reading_date:
-                so_ngay_da_qua = (latest_reading_date - period_start).days + 1
-            else:
-                # Không có lần đọc nào rơi trong kỳ (hiếm) -> fallback
-                # theo ngày hôm nay của server.
-                _, _, today_ref = self._current_period_bounds(bill_history)
-                so_ngay_da_qua = (today_ref - period_start).days + 1
-
-            so_ngay_da_qua = min(max(so_ngay_da_qua, 1), so_ngay_ky)
-            kwh_du_tinh_ca_ky = kwh_so_far / so_ngay_da_qua * so_ngay_ky
-
-            bill_result = await self.estimate_bill(kwh_du_tinh_ca_ky, period_start, period_end)
+            bill_result = await self.estimate_bill(kwh_so_far, period_start, period_end)
             if bill_result:
                 bill_estimate = {
-                    "che_do": f"ngoại suy tuyến tính - nguồn: {nguon_kwh}, đã capture {so_ngay_da_qua}/{so_ngay_ky} ngày",
+                    "che_do": f"tính trực tiếp trên số đã dùng (không ngoại suy) - nguồn: {nguon_kwh}",
                     "kwh_da_dung": kwh_so_far,
-                    "kwh_du_tinh_ca_ky": round(kwh_du_tinh_ca_ky, 2),
-                    "so_ngay_da_qua": so_ngay_da_qua,
-                    "so_ngay_ky": so_ngay_ky,
                     "ngay_dau_ky": period_start.isoformat(),
                     "ngay_cuoi_ky_du_kien": period_end.isoformat(),
                     "tien_truoc_thue": bill_result.get("SO_TIEN"),
@@ -404,16 +376,18 @@ class CPCApi:
                     "tong_tien_du_tinh": bill_result.get("TONG_TIEN"),
                 }
 
-        # current_period_start dùng cho các sensor khác (Tháng hiện tại...)
-        # - ưu tiên ngày thật từ EVN nếu có kỳ chưa chốt tách riêng.
-        if ky_chua_chot and ky_chua_chot.get("NGAY_DKY"):
+        # current_period_start dùng cho các sensor khác (Tháng hiện tại,
+        # mục 5 "Tiêu thụ tháng tạm chốt", mục 6 "Tiêu thụ tháng tiếp
+        # theo"...) - ưu tiên ngày thật từ EVN (row_thang_hien_tai đã xác
+        # định ở trên) nếu có, fallback về ước tính theo lịch.
+        cp_start, cp_end = period_start, period_end
+        if row_thang_hien_tai and row_thang_hien_tai.get("NGAY_DKY"):
             try:
-                cp_start = date.fromisoformat(ky_chua_chot["NGAY_DKY"][:10])
-                cp_end = date.fromisoformat(ky_chua_chot["NGAY_CKY"][:10])
+                cp_start = date.fromisoformat(row_thang_hien_tai["NGAY_DKY"][:10])
+                if row_thang_hien_tai.get("NGAY_CKY"):
+                    cp_end = date.fromisoformat(row_thang_hien_tai["NGAY_CKY"][:10])
             except (ValueError, TypeError):
-                cp_start, cp_end, _ = self._current_period_bounds(bill_history)
-        else:
-            cp_start, cp_end, _ = self._current_period_bounds(bill_history)
+                pass
 
         return {
             "customer_info": customer_info,
