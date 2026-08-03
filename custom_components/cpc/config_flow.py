@@ -54,7 +54,7 @@ class CPCConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> "CPCOptionsFlow":
-        return CPCOptionsFlow(config_entry)
+        return CPCOptionsFlow()
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         errors: dict[str, str] = {}
@@ -104,10 +104,12 @@ class CPCOptionsFlow(config_entries.OptionsFlow):
     """Options flow - cho phép đổi biểu giá SAU KHI đã add integration,
     không cần xoá/tạo lại entry. Truy cập qua nút "Configure"/"Cấu hình"
     trên entry trong Settings > Devices & Services.
-    """
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self.config_entry = config_entry
+    QUAN TRỌNG: KHÔNG override __init__ để tự gán self.config_entry -
+    ở các bản Home Assistant mới, config_entry là property do HA tự set
+    sẵn (read-only), tự gán tay sẽ gây lỗi 500 "Server got itself in
+    trouble" khi mở Configure.
+    """
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:
