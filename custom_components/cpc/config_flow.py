@@ -120,10 +120,9 @@ class CPCOptionsFlow(config_entries.OptionsFlow):
                 self.config_entry,
                 data={**self.config_entry.data, CONF_TARIFF: new_tariff},
             )
-            # Reload để CPCApi trong hass.data dùng ngay biểu giá mới.
-            self.hass.async_create_task(
-                self.hass.config_entries.async_reload(self.config_entry.entry_id)
-            )
+            # Không cần tự gọi async_reload ở đây nữa - update listener
+            # đăng ký trong __init__.py (add_update_listener) sẽ tự động
+            # reload integration ngay khi entry.data đổi.
             return self.async_create_entry(title="", data={})
 
         current_tariff = self.config_entry.data.get(CONF_TARIFF, TARIFF_DEFAULT)
