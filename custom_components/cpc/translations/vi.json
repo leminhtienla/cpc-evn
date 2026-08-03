@@ -7,7 +7,8 @@
         "data": {
           "username": "Tên đăng nhập",
           "password": "Mật khẩu",
-          "customer_code": "Mã khách hàng (bắt đầu bằng P, tối thiểu 11 ký tự)"
+          "customer_code": "Mã khách hàng (bắt đầu bằng P, tối thiểu 11 ký tự)",
+          "tariff": "Biểu giá điện (dùng để tính \"Dự tính tiền điện\")"
         }
       }
     },
@@ -18,6 +19,16 @@
       "invalid_format": "Mã khách hàng không hợp lệ (phải bắt đầu bằng P, tối thiểu 11 ký tự)",
       "invalid_auth": "Sai tên đăng nhập hoặc mật khẩu, hoặc tài khoản yêu cầu captcha",
       "cannot_connect": "Không kết nối được tới cskh.cpc.vn, thử lại sau"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Đổi biểu giá điện",
+        "data": {
+          "tariff": "Biểu giá điện (dùng để tính \"Dự tính tiền điện\")"
+        }
+      }
     }
   }
 }

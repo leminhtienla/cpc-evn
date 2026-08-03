@@ -78,6 +78,16 @@ sánh tháng/năm thật** (`NGAY_DKY` của từng dòng) với entity `Tháng 
 tại` (vốn đã tính đúng dựa trên hóa đơn đã chốt gần nhất) để xác định
 dòng nào thuộc tháng hiện tại, dòng nào thuộc tháng sau.
 
+## Biểu giá điện (chọn khi cấu hình integration, đổi được sau qua Options)
+
+Dùng để tính sensor "Dự tính tiền điện tháng hiện tại", xác nhận từ HAR capture thật trên `calc.evn.com.vn`:
+
+- **Sinh hoạt (bậc thang)** — mặc định, dành cho hộ gia đình. Đã đối chiếu khớp chính xác tới từng đồng với hoá đơn thật (134 kWh → 305.230 VNĐ).
+- **Kinh doanh dịch vụ - 1 giá** — 1 mức giá cố định.
+- **Kinh doanh dịch vụ - 3 giá** — có 3 mức giá theo khung giờ (Cao điểm/Bình thường/Thấp điểm). **Lưu ý:** vì không có dữ liệu tách theo khung giờ từ phía CPC, toàn bộ sản lượng được tính vào khung "Bình Thường" - đây là ước tính gần đúng, không phản ánh đúng cơ cấu giờ dùng điện thực tế.
+
+**Đổi biểu giá sau khi đã add:** Settings → Devices & Services → tìm entry CPC → nút **Configure/Cấu hình** → chọn biểu giá mới → Submit. Integration tự reload, không cần xoá/tạo lại entry.
+
 ## Đã bỏ
 
 - Sensor "Lịch sử hóa đơn theo tháng" và "Lịch sử treo tháo công tơ" đã bị

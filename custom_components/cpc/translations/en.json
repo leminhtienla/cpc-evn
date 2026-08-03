@@ -7,7 +7,8 @@
         "data": {
           "username": "Username",
           "password": "Password",
-          "customer_code": "Customer code (starts with P, at least 11 characters)"
+          "customer_code": "Customer code (starts with P, at least 11 characters)",
+          "tariff": "Electricity tariff (used to calculate \"Estimated bill\")"
         }
       }
     },
@@ -18,6 +19,16 @@
       "invalid_format": "Invalid customer code (must start with P, at least 11 characters)",
       "invalid_auth": "Wrong username/password, or the account requires captcha",
       "cannot_connect": "Could not connect to cskh.cpc.vn, try again later"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Change electricity tariff",
+        "data": {
+          "tariff": "Electricity tariff (used to calculate \"Estimated bill\")"
+        }
+      }
     }
   }
 }

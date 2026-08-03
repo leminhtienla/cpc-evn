@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import CPCApi
-from .const import CONF_CUSTOMER_CODE, CONF_PASSWORD, CONF_USERNAME, DOMAIN
+from .const import CONF_CUSTOMER_CODE, CONF_PASSWORD, CONF_TARIFF, CONF_USERNAME, DOMAIN, TARIFF_DEFAULT
 from .coordinator import CPCDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -26,6 +26,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data[CONF_USERNAME],
         entry.data[CONF_PASSWORD],
         entry.data[CONF_CUSTOMER_CODE],
+        entry.data.get(CONF_TARIFF, TARIFF_DEFAULT),
     )
     coordinator = CPCDataUpdateCoordinator(hass, api, entry.data[CONF_CUSTOMER_CODE])
     await coordinator.async_config_entry_first_refresh()

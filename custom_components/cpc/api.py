@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Optional
 
 import aiohttp
 
+from .const import TARIFF_DEFAULT, TARIFF_KINH_DOANH_1_GIA, TARIFF_KINH_DOANH_3_GIA, TARIFF_SINH_HOAT
+
 _LOGGER = logging.getLogger(__name__)
 
 BASE_URL = "https://cskh-api.cpc.vn"
@@ -37,11 +39,12 @@ class CPCApiError(Exception):
 class CPCApi:
     """Client gọi API cổng self-service CPC."""
 
-    def __init__(self, session: aiohttp.ClientSession, username: str, password: str, customer_code: str):
+    def __init__(self, session: aiohttp.ClientSession, username: str, password: str, customer_code: str, tariff: str = TARIFF_DEFAULT):
         self._session = session
         self._username = username
         self._password = password
         self.customer_code = customer_code
+        self.tariff = tariff
         self.token: Optional[str] = None
         self.org_code: Optional[str] = None  # vd "PP0700", lấy từ customer info
         self.server_time_header: Optional[str] = None  # header "Date" thô từ response gần nhất
@@ -222,10 +225,81 @@ class CPCApi:
         result = data.get("result") or []
         return result
 
+    def _bill_calc_payload(self, san_luong_kwh: float, ngay_dky: date, ngay_cky: date, so_ho: int) -> Dict[str, Any]:
+        """Build payload theo đúng biểu giá đã chọn (self.tariff).
+
+        3 biểu giá được xác nhận từ HAR capture thực tế trên
+        calc.evn.com.vn (không suy đoán):
+        - Sinh hoạt bậc thang (mặc định): MA_CAPDAP=1, MA_NHOMNN=SHBT,
+          1 dòng giá "KT". Đã đối chiếu khớp chính xác tới từng đồng với
+          hoá đơn thật (134 kWh -> 305.230 VNĐ).
+        - Kinh doanh dịch vụ 1 giá: MA_CAPDAP=2, MA_NHOMNN=KDDV, 1 dòng
+          giá "BT" (Bình Thường).
+        - Kinh doanh dịch vụ 3 giá: giống 1 giá nhưng có thêm 2 dòng giá
+          CD (Cao Điểm) và TD (Thấp Điểm). LƯU Ý: vì không có dữ liệu
+          tách theo khung giờ (Cao Điểm/Bình Thường/Thấp Điểm) từ phía
+          CPC, toàn bộ sản lượng được tính vào khung "Bình Thường" - đây
+          là ƯỚC TÍNH GẦN ĐÚNG, không phản ánh đúng cơ cấu giờ dùng điện
+          thực tế của khách hàng 3 giá.
+        """
+        if self.tariff == TARIFF_KINH_DOANH_1_GIA:
+            ma_capdap = "2"
+            ma_nhomnn = "KDDV"
+            hdg_bban_apgia = [
+                {"LOAI_BCS": "BT", "TGIAN_BANDIEN": "BT", "MA_NHOMNN": ma_nhomnn, "MA_NGIA": "A"},
+            ]
+            gcs_chiso = [
+                {"BCS": "BT", "SAN_LUONG": 0, "LOAI_CHISO": "CCS"},
+                {"BCS": "CD", "SAN_LUONG": 0, "LOAI_CHISO": "CCS"},
+                {"BCS": "TD", "SAN_LUONG": 0, "LOAI_CHISO": "CCS"},
+                {"BCS": "VC", "SAN_LUONG": 0, "LOAI_CHISO": "CCS"},
+                {"BCS": "BT", "SAN_LUONG": str(round(san_luong_kwh, 2)), "LOAI_CHISO": "DDK"},
+            ]
+            so_ho_val = "0"
+        elif self.tariff == TARIFF_KINH_DOANH_3_GIA:
+            ma_capdap = "2"
+            ma_nhomnn = "KDDV"
+            hdg_bban_apgia = [
+                {"LOAI_BCS": "BT", "TGIAN_BANDIEN": "BT", "MA_NHOMNN": ma_nhomnn, "MA_NGIA": "A"},
+                {"LOAI_BCS": "CD", "TGIAN_BANDIEN": "CD", "MA_NHOMNN": ma_nhomnn, "MA_NGIA": "A"},
+                {"LOAI_BCS": "TD", "TGIAN_BANDIEN": "TD", "MA_NHOMNN": ma_nhomnn, "MA_NGIA": "A"},
+            ]
+            # Không có dữ liệu tách theo khung giờ - dồn hết vào "Bình
+            # Thường" (xem lưu ý trong docstring).
+            gcs_chiso = [
+                {"BCS": "BT", "SAN_LUONG": 0, "LOAI_CHISO": "CCS"},
+                {"BCS": "CD", "SAN_LUONG": 0, "LOAI_CHISO": "CCS"},
+                {"BCS": "TD", "SAN_LUONG": 0, "LOAI_CHISO": "CCS"},
+                {"BCS": "VC", "SAN_LUONG": 0, "LOAI_CHISO": "CCS"},
+                {"BCS": "BT", "SAN_LUONG": str(round(san_luong_kwh, 2)), "LOAI_CHISO": "DDK"},
+            ]
+            so_ho_val = "0"
+        else:  # TARIFF_SINH_HOAT (mặc định)
+            ma_capdap = "1"
+            hdg_bban_apgia = [
+                {"LOAI_BCS": "KT", "TGIAN_BANDIEN": "KT", "MA_NHOMNN": "SHBT", "MA_NGIA": "A"},
+            ]
+            gcs_chiso = [
+                {"BCS": "KT", "SAN_LUONG": str(round(san_luong_kwh, 2)), "LOAI_CHISO": "DDK"},
+            ]
+            so_ho_val = str(so_ho)
+
+        return {
+            "KIMUA_CSPK": "0",
+            "LOAI_DDO": "3" if self.tariff == TARIFF_KINH_DOANH_3_GIA else "1",
+            "SO_HO": so_ho_val,
+            "MA_CAPDAP": ma_capdap,
+            "NGAY_DKY": ngay_dky.strftime("%d/%m/%Y"),
+            "NGAY_CKY": ngay_cky.strftime("%d/%m/%Y"),
+            "NGAY_DGIA": "01/01/1900",
+            "HDG_BBAN_APGIA": hdg_bban_apgia,
+            "GCS_CHISO": gcs_chiso,
+        }
+
     async def estimate_bill(self, san_luong_kwh: float, ngay_dky: date, ngay_cky: date, so_ho: int = 1) -> Optional[Dict[str, Any]]:
         """Gọi công cụ tính hoá đơn CHÍNH THỨC của EVN (calc.evn.com.vn) để
         tính tiền điện ứng với 1 mức tiêu thụ (kWh) cho trước, theo đúng
-        biểu giá bậc thang sinh hoạt hiện hành - KHÔNG cần đăng nhập.
+        biểu giá đã chọn (self.tariff) - KHÔNG cần đăng nhập.
 
         ngay_dky/ngay_cky: ngày đầu/cuối kỳ (dùng để xác định số ngày
         trong kỳ - biểu giá bậc thang co giãn theo số ngày, ví dụ kỳ 2
@@ -234,30 +308,7 @@ class CPCApi:
         Trả về dict gốc từ EVN (có HDN_HDON[0] chứa SO_TIEN, TIEN_GTGT,
         TONG_TIEN...) hoặc None nếu lỗi.
         """
-        payload = {
-            "KIMUA_CSPK": "0",
-            "LOAI_DDO": "1",
-            "SO_HO": so_ho,
-            "MA_CAPDAP": "1",
-            "NGAY_DKY": ngay_dky.strftime("%d/%m/%Y"),
-            "NGAY_CKY": ngay_cky.strftime("%d/%m/%Y"),
-            "NGAY_DGIA": "01/01/1900",
-            "HDG_BBAN_APGIA": [
-                {
-                    "LOAI_BCS": "KT",
-                    "TGIAN_BANDIEN": "KT",
-                    "MA_NHOMNN": "SHBT",
-                    "MA_NGIA": "A",
-                }
-            ],
-            "GCS_CHISO": [
-                {
-                    "BCS": "KT",
-                    "SAN_LUONG": str(round(san_luong_kwh, 2)),
-                    "LOAI_CHISO": "DDK",
-                }
-            ],
-        }
+        payload = self._bill_calc_payload(san_luong_kwh, ngay_dky, ngay_cky, so_ho)
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json, text/plain, */*",
