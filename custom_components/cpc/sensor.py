@@ -50,6 +50,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         CPCSpiderBreakdownSensor(coordinator, customer_code),
         CPCSpiderCurrentPortionSensor(coordinator, customer_code),
         CPCBillEstimateSensor(coordinator, customer_code),
+        CPCCurrentUnitPriceSensor(coordinator, customer_code),
         CPCLatestBillPeriodSensor(coordinator, customer_code),
         CPCLastYearPeriodSensor(coordinator, customer_code),
         CPCMonthlyConsumptionSensor(coordinator, customer_code),
@@ -544,6 +545,46 @@ class CPCBillEstimateSensor(CPCBaseSensor):
             "Thuế GTGT (VNĐ)": est.get("tien_thue"),
             "Nguồn": "calc.evn.com.vn (công cụ tính hoá đơn chính thức của EVN)",
             "Lưu ý": "Đây là tiền điện của số kWh ĐÃ DÙNG tới hiện tại (không ngoại suy cho cả tháng) - sẽ tăng dần theo từng chu kỳ cập nhật khi bạn dùng thêm điện.",
+        }
+
+
+class CPCCurrentUnitPriceSensor(CPCBaseSensor):
+    """Đơn giá điện (VNĐ/kWh) của BẬC CAO NHẤT đã chạm tới, ứng với mức
+    tiêu thụ hiện tại. Lấy TRỰC TIẾP từ chính response của công cụ tính
+    hoá đơn EVN (mảng HDN_HDONCTIET, field DON_GIA) - KHÔNG tự lưu bảng
+    giá cứng trong code, để không bị lỗi thời khi EVN điều chỉnh giá.
+
+    Với biểu giá Sinh hoạt (bậc thang): đây là đơn giá bậc hiện tại -
+    nếu dùng thêm 1 kWh nữa (mà chưa vượt ngưỡng bậc) thì kWh đó cũng
+    tính theo đúng đơn giá này.
+    Với biểu giá Kinh doanh (1 giá/3 giá): không có khái niệm "bậc",
+    đơn giá này chính là mức giá cố định đang áp dụng.
+    """
+
+    _sensor_key = "don_gia_dien_hien_tai"
+    _attr_name = "Đơn giá điện hiện tại"
+    _attr_native_unit_of_measurement = "VNĐ/kWh"
+    _attr_icon = "mdi:currency-usd"
+
+    @property
+    def _est(self) -> dict:
+        return (self.coordinator.data or {}).get("bill_estimate") or {}
+
+    @property
+    def native_value(self):
+        return self._est.get("don_gia_hien_tai")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        est = self._est
+        if not est:
+            return {}
+        return {
+            "Bậc/khung giá": est.get("bac_hien_tai"),
+            "Định mức bậc (%)": est.get("dinh_muc_hien_tai"),
+            "Đã dùng tới hiện tại (kWh)": est.get("kwh_da_dung"),
+            "Nguồn": "calc.evn.com.vn (công cụ tính hoá đơn chính thức của EVN, mảng HDN_HDONCTIET)",
+            "Lưu ý": "Đơn giá của bậc CAO NHẤT đã chạm tới với mức tiêu thụ hiện tại - tự cập nhật đúng theo giá EVN công bố, không dùng bảng giá cố định trong code.",
         }
 
 

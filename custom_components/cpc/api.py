@@ -329,7 +329,25 @@ class CPCApi:
         bills = (data.get("Data") or {}).get("HDN_HDON") or []
         if not bills:
             return None
-        return bills[0]
+
+        result = dict(bills[0])
+
+        # HDN_HDONCTIET: breakdown TỪNG BẬC/khung giá đã dùng, do CHÍNH
+        # EVN trả về (không tự lưu bảng giá cứng trong code - tránh lỗi
+        # thời khi EVN điều chỉnh giá điện). Mỗi dòng có DON_GIA (VNĐ/kWh)
+        # và DIEN_TTHU (kWh thuộc dòng đó). Lấy dòng có DIEN_TTHU > 0
+        # CUỐI CÙNG trong danh sách = bậc cao nhất đã chạm tới với mức
+        # tiêu thụ hiện tại -> đó là "đơn giá hiện tại" (giá cho mỗi kWh
+        # tiếp theo nếu dùng thêm, tại đúng thời điểm này).
+        chi_tiet = (data.get("Data") or {}).get("HDN_HDONCTIET") or []
+        rows_used = [r for r in chi_tiet if (r.get("DIEN_TTHU") or 0) > 0]
+        if rows_used:
+            last_row = rows_used[-1]
+            result["DON_GIA_HIEN_TAI"] = last_row.get("DON_GIA")
+            result["DINH_MUC_HIEN_TAI"] = last_row.get("DINH_MUC")
+            result["BCS_HIEN_TAI"] = last_row.get("BCS")
+
+        return result
 
 
     def _current_period_bounds(self, bill_history: List[Dict[str, Any]]) -> tuple:
@@ -435,6 +453,9 @@ class CPCApi:
                     "tien_truoc_thue": bill_result.get("SO_TIEN"),
                     "tien_thue": bill_result.get("TIEN_GTGT"),
                     "tong_tien_du_tinh": bill_result.get("TONG_TIEN"),
+                    "don_gia_hien_tai": bill_result.get("DON_GIA_HIEN_TAI"),
+                    "dinh_muc_hien_tai": bill_result.get("DINH_MUC_HIEN_TAI"),
+                    "bac_hien_tai": bill_result.get("BCS_HIEN_TAI"),
                 }
 
         # current_period_start dùng cho các sensor khác (Tháng hiện tại,
