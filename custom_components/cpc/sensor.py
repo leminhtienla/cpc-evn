@@ -10,7 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_CUSTOMER_CODE, DOMAIN
+from .const import CONF_CUSTOMER_CODE, DOMAIN, TARIFF_SINH_HOAT
 from .coordinator import CPCDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -51,6 +51,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         CPCSpiderCurrentPortionSensor(coordinator, customer_code),
         CPCBillEstimateSensor(coordinator, customer_code),
         CPCCurrentUnitPriceSensor(coordinator, customer_code),
+        CPCCurrentTierSensor(coordinator, customer_code),
         CPCLatestBillPeriodSensor(coordinator, customer_code),
         CPCLastYearPeriodSensor(coordinator, customer_code),
         CPCMonthlyConsumptionSensor(coordinator, customer_code),
@@ -585,6 +586,53 @@ class CPCCurrentUnitPriceSensor(CPCBaseSensor):
             "Đã dùng tới hiện tại (kWh)": est.get("kwh_da_dung"),
             "Nguồn": "calc.evn.com.vn (công cụ tính hoá đơn chính thức của EVN, mảng HDN_HDONCTIET)",
             "Lưu ý": "Đơn giá của bậc CAO NHẤT đã chạm tới với mức tiêu thụ hiện tại - tự cập nhật đúng theo giá EVN công bố, không dùng bảng giá cố định trong code.",
+        }
+
+
+class CPCCurrentTierSensor(CPCBaseSensor):
+    """Bậc/khung giá HIỆN TẠI đang áp dụng cho mức tiêu thụ hiện tại -
+    entity RIÊNG tách khỏi sensor 'Đơn giá điện hiện tại', để có thể xem
+    trực tiếp đang ở bậc mấy mà không cần đoán qua giá trị VNĐ/kWh.
+
+    - Biểu giá Sinh hoạt (bậc thang): EVN trả về ĐÚNG số dòng ứng với số
+      bậc đã dùng tới (không có field số bậc trực tiếp) -> lấy SỐ DÒNG
+      đã dùng làm số thứ tự bậc, hiển thị "Bậc N".
+    - Biểu giá Kinh doanh (1 giá/3 giá): không có khái niệm "bậc" - hiển
+      thị thẳng tên khung giá EVN trả về (BT=Bình Thường, CD=Cao Điểm,
+      TD=Thấp Điểm).
+    """
+
+    _sensor_key = "bac_don_gia_hien_tai"
+    _attr_name = "Bậc đơn giá hiện tại"
+    _attr_icon = "mdi:stairs"
+
+    _TEN_KHUNG_GIA = {"BT": "Bình Thường", "CD": "Cao Điểm", "TD": "Thấp Điểm"}
+
+    @property
+    def _est(self) -> dict:
+        return (self.coordinator.data or {}).get("bill_estimate") or {}
+
+    @property
+    def native_value(self):
+        est = self._est
+        if not est:
+            return None
+        if est.get("bieu_gia") == TARIFF_SINH_HOAT:
+            so_thu_tu = est.get("so_thu_tu_bac")
+            return f"Bậc {so_thu_tu}" if so_thu_tu else None
+        bcs = est.get("bac_hien_tai")
+        return self._TEN_KHUNG_GIA.get(bcs, bcs)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        est = self._est
+        if not est:
+            return {}
+        return {
+            "Đơn giá (VNĐ/kWh)": est.get("don_gia_hien_tai"),
+            "Đã dùng tới hiện tại (kWh)": est.get("kwh_da_dung"),
+            "Biểu giá đang dùng": est.get("bieu_gia"),
+            "Nguồn": "calc.evn.com.vn (công cụ tính hoá đơn chính thức của EVN, mảng HDN_HDONCTIET)",
         }
 
 

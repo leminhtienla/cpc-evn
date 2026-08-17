@@ -339,10 +339,18 @@ class CPCApi:
         # CUỐI CÙNG trong danh sách = bậc cao nhất đã chạm tới với mức
         # tiêu thụ hiện tại -> đó là "đơn giá hiện tại" (giá cho mỗi kWh
         # tiếp theo nếu dùng thêm, tại đúng thời điểm này).
+        #
+        # Với biểu giá Sinh hoạt (SHBT): mọi dòng đều có BCS="KT" giống
+        # nhau (không phân biệt bậc qua field này) - EVN chỉ trả về ĐÚNG
+        # số dòng ứng với số bậc đã dùng tới, theo thứ tự bậc tăng dần ->
+        # thứ tự (index) của dòng cuối cùng chính là SỐ THỨ TỰ BẬC.
+        # Với biểu giá Kinh doanh (KDDV): BCS đã là nhãn khung giờ trực
+        # tiếp (BT/CD/TD), không cần suy ra qua thứ tự.
         chi_tiet = (data.get("Data") or {}).get("HDN_HDONCTIET") or []
         rows_used = [r for r in chi_tiet if (r.get("DIEN_TTHU") or 0) > 0]
         if rows_used:
             last_row = rows_used[-1]
+            result["SO_THU_TU_BAC"] = len(rows_used)
             result["DON_GIA_HIEN_TAI"] = last_row.get("DON_GIA")
             result["DINH_MUC_HIEN_TAI"] = last_row.get("DINH_MUC")
             result["BCS_HIEN_TAI"] = last_row.get("BCS")
@@ -456,6 +464,8 @@ class CPCApi:
                     "don_gia_hien_tai": bill_result.get("DON_GIA_HIEN_TAI"),
                     "dinh_muc_hien_tai": bill_result.get("DINH_MUC_HIEN_TAI"),
                     "bac_hien_tai": bill_result.get("BCS_HIEN_TAI"),
+                    "so_thu_tu_bac": bill_result.get("SO_THU_TU_BAC"),
+                    "bieu_gia": self.tariff,
                 }
 
         # current_period_start dùng cho các sensor khác (Tháng hiện tại,
